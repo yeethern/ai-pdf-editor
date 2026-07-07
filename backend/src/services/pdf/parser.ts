@@ -443,10 +443,11 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
   }
 
   if (rawElements.length === 0) {
-    const ocrMsg = `Page ${pageNum + 1}: no text layer, running OCR...`;
+    const ocrEngine = process.platform === 'darwin' && fs.existsSync('/usr/bin/clang') ? 'macOS Vision' : 'Tesseract.js';
+    const ocrMsg = `Page ${pageNum + 1}: no text layer, running OCR (${ocrEngine})...`;
     console.log(ocrMsg);
     onLog?.('page', ocrMsg);
-    const ocrScale = 0.75;
+    const ocrScale = 2.0;
     const vp = page.getViewport({ scale: ocrScale });
     const canvas = createCanvas(vp.width, vp.height);
     const ctx = canvas.getContext('2d');

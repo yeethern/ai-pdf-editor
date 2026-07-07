@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import Tesseract from 'tesseract.js';
 import { v4 as uuid } from 'uuid';
 import { detectFont } from './fonts';
 import { ColumnBoundary } from '../../types';
@@ -23,6 +24,10 @@ export interface OcrWordItem {
 const BIN_PATH = path.join(__dirname, '..', '..', '..', 'bin', 'vision-ocr.m');
 const COMPILED_PATH = '/tmp/vision-ocr';
 
+function isMacOS(): boolean {
+  return process.platform === 'darwin' && fs.existsSync('/usr/bin/clang');
+}
+
 function ensureBinary(): string {
   if (fs.existsSync(COMPILED_PATH)) return COMPILED_PATH;
   if (fs.existsSync(BIN_PATH) && fs.existsSync('/usr/bin/clang')) {
@@ -35,6 +40,35 @@ function ensureBinary(): string {
     ], { timeout: 30000, stdio: 'pipe' });
   }
   return COMPILED_PATH;
+}
+
+function applyFontEnsemble(results: OcrWordItem[]): void {
+  const fontCounts = new Map<string, { count: number; totalError: number }>();
+  for (const r of results) {
+    const f = r.font;
+    if (!fontCounts.has(f)) fontCounts.set(f, { count: 0, totalError: 0 });
+    const e = fontCounts.get(f)!;
+    e.count++;
+    e.totalError += r.fontError || 0;
+  }
+
+  let topNonHelvetica = '', topCount = 0;
+  for (const [f, { count }] of fontCounts) {
+    if (f !== 'Helvetica' && count > topCount) { topNonHelvetica = f; topCount = count; }
+  }
+
+  const totalWords = results.length;
+  if (totalWords >= 30 && topCount > 0 && topCount / totalWords > 0.25) {
+    const avgError = (fontCounts.get(topNonHelvetica)?.totalError ?? 0) / topCount;
+    for (const r of results) {
+      if (r.font !== topNonHelvetica && r.font !== 'Helvetica') {
+        if (r.fontError !== undefined && r.fontError > avgError + 0.03) {
+          r.font = topNonHelvetica;
+          r.fontError = avgError;
+        }
+      }
+    }
+  }
 }
 
 export function splitCrossColumnItems(
@@ -120,12 +154,7 @@ export function splitCrossColumnItems(
   return result;
 }
 
-export async function ocrPage(
-  imageBuffer: Buffer,
-  renderScale: number,
-  pageWidth: number,
-  pageHeight: number,
-): Promise<OcrWordItem[]> {
+async function ocrWithVision(imageBuffer: Buffer, renderScale: number): Promise<OcrWordItem[]> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ocr-'));
   const imgPath = path.join(tmpDir, 'page.jpg');
 
@@ -134,7 +163,7 @@ export async function ocrPage(
     const binary = ensureBinary();
 
     if (!fs.existsSync(binary)) {
-      console.error('Vision OCR binary not found, compile with: clang -framework Foundation -framework Vision -framework Cocoa -o /tmp/vision-ocr backend/bin/vision-ocr.m');
+      console.error('Vision OCR binary not found');
       return [];
     }
 
@@ -179,37 +208,7 @@ export async function ocrPage(
       };
     }));
 
-    // Page-level font ensemble: find the majority non-Helvetica font and correct outliers
-    const fontCounts = new Map<string, { count: number; totalError: number }>();
-    for (const r of results) {
-      const f = r.font;
-      if (!fontCounts.has(f)) fontCounts.set(f, { count: 0, totalError: 0 });
-      const e = fontCounts.get(f)!;
-      e.count++;
-      e.totalError += r.fontError || 0;
-    }
-
-    // Find the most common non-Helvetica font
-    let topNonHelvetica = '', topCount = 0;
-    for (const [f, { count }] of fontCounts) {
-      if (f !== 'Helvetica' && count > topCount) { topNonHelvetica = f; topCount = count; }
-    }
-
-    // Only run ensemble if a non-Helvetica font has a meaningful share of a large page
-    const totalWords = results.length;
-    if (totalWords >= 30 && topCount > 0 && topCount / totalWords > 0.25) {
-      const avgError = (fontCounts.get(topNonHelvetica)?.totalError ?? 0) / topCount;
-      for (const r of results) {
-        if (r.font !== topNonHelvetica && r.font !== 'Helvetica') {
-          // Only reassign non-Helvetica outliers whose error is meaningfully worse
-          if (r.fontError !== undefined && r.fontError > avgError + 0.03) {
-            r.font = topNonHelvetica;
-            r.fontError = avgError;
-          }
-        }
-      }
-    }
-
+    applyFontEnsemble(results);
     return results;
   } catch (e) {
     console.error('Vision OCR failed:', e);
@@ -217,4 +216,89 @@ export async function ocrPage(
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+}
+
+let _worker: Tesseract.Worker | null = null;
+
+async function getWorker(): Promise<Tesseract.Worker> {
+  if (!_worker) {
+    _worker = await Tesseract.createWorker('eng', 1);
+  }
+  return _worker;
+}
+
+async function ocrWithTesseract(imageBuffer: Buffer, renderScale: number): Promise<OcrWordItem[]> {
+  try {
+    const worker = await getWorker();
+    const { data } = await worker.recognize(imageBuffer, {}, { blocks: true });
+
+    if (!data.blocks) return [];
+
+    const results: OcrWordItem[] = [];
+
+    for (const block of data.blocks) {
+      for (const para of block.paragraphs) {
+        for (const line of para.lines) {
+          for (const word of line.words) {
+            const content = (word.text || '').trim();
+            if (!content) continue;
+
+            const b = word.bbox;
+            const rawBbox: [number, number, number, number] = [
+              b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0,
+            ];
+            const bbox: [number, number, number, number] = [
+              Math.round(rawBbox[0] / renderScale),
+              Math.round(rawBbox[1] / renderScale),
+              Math.round(rawBbox[2] / renderScale),
+              Math.round(rawBbox[3] / renderScale),
+            ];
+            const fontSize = Math.round(bbox[3]);
+            const charBboxes: Array<[number, number, number, number] | null> =
+              (word.symbols || []).map((s: any) => {
+                if (!s || !s.bbox) return null;
+                const sb = s.bbox;
+                return [Math.round(sb.x0), Math.round(sb.y0), Math.round(sb.x1 - sb.x0), Math.round(sb.y1 - sb.y0)] as [number, number, number, number];
+              });
+
+            const { font, bold, italic, error } = await detectFont(
+              content, bbox[2], bbox[3], imageBuffer, rawBbox, charBboxes, renderScale,
+            );
+
+            results.push({
+              id: uuid(),
+              type: 'text',
+              content,
+              bbox,
+              confidence: word.confidence / 100,
+              font,
+              fontError: error,
+              fontSize,
+              editable: true,
+              style: { bold, italic, underline: false },
+              charBboxes,
+            });
+          }
+        }
+      }
+    }
+
+    applyFontEnsemble(results);
+    return results;
+  } catch (e) {
+    console.error('Tesseract OCR failed:', e);
+    return [];
+  }
+}
+
+export async function ocrPage(
+  imageBuffer: Buffer,
+  renderScale: number,
+  pageWidth: number,
+  pageHeight: number,
+): Promise<OcrWordItem[]> {
+  if (isMacOS()) {
+    return ocrWithVision(imageBuffer, renderScale);
+  }
+  return ocrWithTesseract(imageBuffer, renderScale);
 }
