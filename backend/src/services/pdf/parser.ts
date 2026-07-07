@@ -3,7 +3,7 @@ import path from 'path';
 import { v4 as uuid } from 'uuid';
 import { createCanvas } from 'canvas';
 import { PDFDocument, PDFPage, TextElement, PageElement, ColumnBoundary } from '../../types';
-import { ocrPage, splitCrossColumnItems } from './ocr';
+import { ocrPage, splitCrossColumnItems, getRecommendedScale } from './ocr';
 import { groupElements, LogFn } from '../ai/service';
 
 const pdfjsLib = require('pdfjs-dist');
@@ -443,11 +443,11 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
   }
 
   if (rawElements.length === 0) {
-    const ocrEngine = process.platform === 'darwin' && fs.existsSync('/usr/bin/clang') ? 'macOS Vision' : 'Tesseract.js';
+    const ocrScale = getRecommendedScale();
+    const ocrEngine = ocrScale === 0.75 ? 'macOS Vision' : 'Tesseract.js';
     const ocrMsg = `Page ${pageNum + 1}: no text layer, running OCR (${ocrEngine})...`;
     console.log(ocrMsg);
     onLog?.('page', ocrMsg);
-    const ocrScale = 2.0;
     const vp = page.getViewport({ scale: ocrScale });
     const canvas = createCanvas(vp.width, vp.height);
     const ctx = canvas.getContext('2d');

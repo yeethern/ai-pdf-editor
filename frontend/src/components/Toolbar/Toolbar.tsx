@@ -61,9 +61,22 @@ async function renderPageBlob(
     const sw = ew * scale;
     const sh = eh * scale;
 
-    const bg = colors.bg || '#fff';
-    ctx.fillStyle = bg;
-    ctx.fillRect(Math.max(0, sx - 1), Math.max(0, sy - 1), Math.min(sw + 2, cw - sx + 1), Math.min(sh + 2, ch - sy + 1));
+    const isUserText = el.fontError === undefined && el.confidence === undefined;
+    const cover = el.coverBbox;
+    if (isUserText || cover) {
+      const bg = colors.bg || '#fff';
+      if (cover) {
+        const csx = cover[0] * scale;
+        const csy = cover[1] * scale;
+        const csw = cover[2] * scale;
+        const csh = cover[3] * scale;
+        ctx.fillStyle = bg;
+        ctx.fillRect(Math.max(0, csx - 1), Math.max(0, csy - 1), Math.min(csw + 2, cw - csx + 1), Math.min(csh + 2, ch - csy + 1));
+      } else {
+        ctx.fillStyle = bg;
+        ctx.fillRect(Math.max(0, sx - 1), Math.max(0, sy - 1), Math.min(sw + 2, cw - sx + 1), Math.min(sh + 2, ch - sy + 1));
+      }
+    }
 
     const fg = el.style?.color || colors.fg || '#000';
     const fontSize = Math.max(4, (el.fontSize || 11) * scale);

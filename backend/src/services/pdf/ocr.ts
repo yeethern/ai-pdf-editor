@@ -28,6 +28,10 @@ function isMacOS(): boolean {
   return process.platform === 'darwin' && fs.existsSync('/usr/bin/clang');
 }
 
+export function getRecommendedScale(): number {
+  return isMacOS() ? 0.75 : 2.0;
+}
+
 function ensureBinary(): string {
   if (fs.existsSync(COMPILED_PATH)) return COMPILED_PATH;
   if (fs.existsSync(BIN_PATH) && fs.existsSync('/usr/bin/clang')) {

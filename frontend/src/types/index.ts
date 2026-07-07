@@ -11,6 +11,7 @@ export interface TextElement {
   page: number;
   alignment?: 'left' | 'center' | 'right';
   groupIndex?: number;
+  coverBbox?: [number, number, number, number];
   style?: {
     bold?: boolean;
     italic?: boolean;

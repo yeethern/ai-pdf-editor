@@ -92,11 +92,16 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setSelectedText: (text) => set({ selectedText: text }),
 
   markElementEdited: (id: string) => {
-    set((state) => ({
-      editedIds: state.editedIds.includes(id)
-        ? state.editedIds
-        : [...state.editedIds, id],
-    }));
+    set((state) => {
+      if (state.editedIds.includes(id)) return state;
+      if (!state.document) return { editedIds: [...state.editedIds, id] };
+      const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+      const el = doc.pages[state.currentPage]?.elements?.find(e => e.id === id);
+      if (el && el.type === 'text' && !el.coverBbox) {
+        el.coverBbox = [...el.bbox];
+      }
+      return { document: doc, editedIds: [...state.editedIds, id] };
+    });
   },
 
   clearEditedIds: () => set({ editedIds: [] }),

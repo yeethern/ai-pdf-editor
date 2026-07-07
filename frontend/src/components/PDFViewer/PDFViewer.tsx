@@ -367,7 +367,7 @@ export function PDFViewer() {
     const el = page.elements.find(x => x.id === editingId);
     if (el && editVal.trim()) {
       const [ex, ey, ew, eh] = el.bbox;
-      extractColorsFromPage(editingId, ex, ey, ew, eh);  // extracts from original image BEFORE bg fill
+      extractColorsFromPage(editingId, ex, ey, ew, eh);
       updateElement(currentPage, editingId, { content: editVal });
       useEditorStore.getState().pushHistory('Edited text');
       markElementEdited(editingId);
@@ -706,23 +706,31 @@ export function PDFViewer() {
           const editedEls = textEls.filter(el => editedIds.includes(el.id) && el.id !== editingId);
           if (!editedEls.length) return null;
           return editedEls.map(el => {
+            const isUserText = el.fontError === undefined && el.confidence === undefined;
             const colors = colorCache.current.get(el.id);
-            const bg = colors?.bg || 'transparent';
             const fg = el.style?.color || colors?.fg || '#000';
             const align = el.alignment || 'left';
             const ew = el.bbox[2] * zoom;
             const eh = el.bbox[3] * zoom;
+            const cover = el.coverBbox;
             return (
               <div key={el.id}>
-                <div style={{
-                  position: 'absolute',
-                  left: el.bbox[0] * zoom,
-                  top: el.bbox[1] * zoom,
-                  width: ew,
-                  height: eh,
-                  background: bg,
-                  zIndex: 10, pointerEvents: 'none',
-                }} />
+                {(isUserText || cover) && (() => {
+                  const bg = colors?.bg || 'transparent';
+                  const bx = cover ? cover[0] * zoom : el.bbox[0] * zoom;
+                  const by = cover ? cover[1] * zoom : el.bbox[1] * zoom;
+                  const bw = cover ? cover[2] * zoom : ew;
+                  const bh = cover ? cover[3] * zoom : eh;
+                  return <div style={{
+                    position: 'absolute',
+                    left: bx,
+                    top: by,
+                    width: bw,
+                    height: bh,
+                    background: bg,
+                    zIndex: 10, pointerEvents: 'none',
+                  }} />;
+                })()}
                 <div style={{
                   position: 'absolute',
                   left: el.bbox[0] * zoom,

@@ -8,6 +8,7 @@ import { aiRouter } from './routes/ai';
 import { skillRouter } from './routes/skill';
 
 const app = express();
+export default app;
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
