@@ -6,7 +6,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "download-fonts": "tsx scripts/download-fonts.ts"
+    "download-fonts": "tsx scripts/download-fonts.ts",
+    "package": "bash ../build-dist.sh"
   },
   "dependencies": {
     "canvas": "^3.2.3",

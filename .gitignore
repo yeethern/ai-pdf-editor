@@ -5,3 +5,5 @@ dist/
 *.log
 uploads/
 .DS_Store
+PDFEditor-dist/
+PDFEditor.zip

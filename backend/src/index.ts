@@ -8,7 +8,6 @@ import { aiRouter } from './routes/ai';
 import { skillRouter } from './routes/skill';
 
 const app = express();
-export default app;
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
@@ -75,6 +74,15 @@ app.use('/api/skill', skillRouter);
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
+
+// Serve built frontend for local/daemon usage
+const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);

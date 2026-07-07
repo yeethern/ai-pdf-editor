@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download PDF Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 3rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+    }
+    h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.5rem; }
+    p { color: #666; margin-bottom: 2rem; line-height: 1.5; }
+    .buttons { display: flex; flex-direction: column; gap: 1rem; }
+    .btn {
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem 2rem; border-radius: 12px; font-size: 1.1rem; font-weight: 600;
+      text-decoration: none; transition: all 0.15s; gap: 0.5rem;
+    }
+    .btn-primary { background: #000; color: #fff; border: none; }
+    .btn-primary:hover { background: #333; transform: translateY(-1px); }
+    .btn-secondary { background: #e8e8ed; color: #000; }
+    .btn-secondary:hover { background: #d1d1d6; }
+    .note { font-size: 0.85rem; color: #999; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>AI PDF Editor</h1>
+    <p>Download the desktop app to start editing PDFs with AI-powered OCR.</p>
+    <div class="buttons">
+      <a class="btn btn-primary" href="#" onclick="alert('Build the binary first with: cd backend && npx pkg src/index.ts --targets node18-macos-x64 --out-path dist/')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14m0 0l-6-6m6 6l6-6"/>
+        </svg>
+        Download for macOS
+      </a>
+      <a class="btn btn-primary" href="#" onclick="alert('Build the binary first with: cd backend && npx pkg src/index.ts --targets node18-win-x64 --out-path dist/')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14m0 0l-6-6m6 6l6-6"/>
+        </svg>
+        Download for Windows
+      </a>
+      <a class="btn btn-secondary" href="/">Launch Editor (requires backend)</a>
+    </div>
+    <p class="note">After downloading, unzip and double-click the app. Your browser will open the editor.</p>
+  </div>
+</body>
+</html>

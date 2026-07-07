@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store';
 import { api } from '../../services/api';
 import { Condition, Action, StyleRule, ImageOverlay, PDFDocument } from '../../types';
 import { OverlayPreviewCanvas } from './OverlayPreviewCanvas';
+import { API_BASE } from '../../config';
 
 interface CondForm {
   field: string;
@@ -73,7 +74,7 @@ function FontSelect({ value, onChange, fonts }: { value: any; onChange: (v: any)
 
   useEffect(() => {
     for (const [family, entry] of Object.entries(fonts)) {
-      if (entry.file) injectFontFace(family, `/api/fonts/${entry.file}`);
+      if (entry.file) injectFontFace(family, `${API_BASE}/fonts/${entry.file}`);
     }
   }, [fonts]);
 
@@ -191,7 +192,7 @@ export function StylePanel() {
   const [overlayError, setOverlayError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/fonts/manifest').then(r => r.json()).then(data => setFonts(data)).catch(() => {});
+    fetch(`${API_BASE}/fonts/manifest`).then(r => r.json()).then(data => setFonts(data)).catch(() => {});
   }, []);
 
   const updateCond = (ri: number, ci: number, patch: Partial<CondForm>) => {

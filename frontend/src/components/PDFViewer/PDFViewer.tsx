@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store';
 import { api } from '../../services/api';
 import { TextElement, PDFDocument, ImageOverlay } from '../../types';
 import { sampleColors } from '../../utils/colors';
+import { API_BASE } from '../../config';
 
 const SYSTEM_FONTS = new Set([
   'Helvetica', 'Helvetica Neue', 'Times New Roman', 'Courier New', 'Arial',
@@ -24,7 +25,7 @@ let fontManifest: Record<string, string> | null = null;
 async function ensureFontsLoaded(doc: PDFDocument) {
   if (!fontManifest) {
     try {
-      fontManifest = await (await fetch('/api/fonts/manifest')).json();
+      fontManifest = await (await fetch(`${API_BASE}/fonts/manifest`)).json();
     } catch { return; }
   }
 
@@ -39,7 +40,7 @@ async function ensureFontsLoaded(doc: PDFDocument) {
 
   for (const family of usedFamilies) {
     const filename = fontManifest![family];
-    if (filename) injectFontFace(family, `/api/fonts/${filename}`);
+    if (filename) injectFontFace(family, `${API_BASE}/fonts/${filename}`);
   }
 }
 
@@ -132,12 +133,12 @@ export function PDFViewer() {
   }, [doc]);
 
   useEffect(() => {
-    fetch('/api/fonts/manifest').then(r => r.json()).then(data => setFonts(data)).catch(() => {});
+    fetch(`${API_BASE}/fonts/manifest`).then(r => r.json()).then(data => setFonts(data)).catch(() => {});
   }, []);
 
   useEffect(() => {
     for (const [family, entry] of Object.entries(fonts)) {
-      if (entry.file) injectFontFace(family, `/api/fonts/${entry.file}`);
+      if (entry.file) injectFontFace(family, `${API_BASE}/fonts/${entry.file}`);
     }
   }, [fonts]);
 

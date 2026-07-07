@@ -1,6 +1,7 @@
 import { useEditorStore } from '../../store';
 import { TextElement } from '../../types';
 import { sampleColors } from '../../utils/colors';
+import { API_BASE } from '../../config';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -181,7 +182,7 @@ export function Toolbar() {
       formData.append(`page_${pi}_height`, String(ph));
     }
 
-    const res = await fetch(`/api/pdf/${document.id}/export`, { method: 'POST', body: formData });
+    const res = await fetch(`${API_BASE}/pdf/${document.id}/export`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

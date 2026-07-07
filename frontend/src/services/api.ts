@@ -1,6 +1,7 @@
 import { PDFDocument, PageElement, TransformationResult, SkillFile, EntityDetection, StyleRule, ImageOverlay } from '../types';
+import { API_BASE } from '../config';
 
-const BASE = '/api';
+const BASE = API_BASE;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
