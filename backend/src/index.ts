@@ -75,6 +75,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
+app.post('/api/shutdown', (_req, res) => {
+  res.json({ status: 'shutting_down' });
+  setTimeout(() => process.exit(0), 100);
+});
+
 // Serve built frontend for local/daemon usage
 const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
 if (fs.existsSync(frontendDist)) {

@@ -49,6 +49,9 @@ npx --yes @mapbox/node-pre-gyp rebuild 2>/dev/null || true
 echo ""
 echo "Creating launchers..."
 
+# Copy stop.command
+cp "$ROOT/stop.command" "$DIST/stop.command"
+
 # macOS .command
 cat > "$DIST/start.command" << 'CMDECMD'
 #!/bin/bash
@@ -58,7 +61,7 @@ npx tsx src/index.ts
 CMDECMD
 chmod +x "$DIST/start.command"
 
-# macOS .app (runs hidden)
+# macOS .app (shows in dock, right-click to Quit)
 mkdir -p "$DIST/PDFEditor.app/Contents/MacOS"
 cat > "$DIST/PDFEditor.app/Contents/MacOS/PDFEditor" << 'APPSH'
 #!/bin/bash
@@ -67,6 +70,7 @@ cd "$DIR/backend"
 npx tsx src/index.ts &
 sleep 2
 open http://localhost:3001
+osascript -e 'display notification "PDF Editor is running. Click Quit from the dock to stop." with title "PDF Editor"' 2>/dev/null || true
 wait
 APPSH
 chmod +x "$DIST/PDFEditor.app/Contents/MacOS/PDFEditor"
@@ -86,8 +90,6 @@ cat > "$DIST/PDFEditor.app/Contents/Info.plist" << 'PLIST'
     <string>1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>LSUIElement</key>
-    <true/>
 </dict>
 </plist>
 PLIST
@@ -126,7 +128,8 @@ echo "  Distribution folder: $DIST ($SIZE)"
 echo "  Zip archive: $ROOT/$NAME.zip ($ZIP_SIZE)"
 echo ""
 echo "To distribute:"
-echo "  macOS: Upload PDFEditor.zip, users download, unzip, double-click start.command"
+echo "  macOS: Upload PDFEditor.zip, users download, unzip, double-click PDFEditor.app"
+echo "  To stop: double-click stop.command, or right-click PDFEditor.app in dock → Quit"
 echo "  Windows: Users unzip, double-click start.vbs (hidden) or start.bat (terminal)"
 echo ""
 echo "Users need Node.js installed."

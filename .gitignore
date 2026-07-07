@@ -6,4 +6,6 @@ dist/
 uploads/
 .DS_Store
 PDFEditor-dist/
-PDFEditor.zip
+/PDFEditor.zip
+.vercel
+.env*

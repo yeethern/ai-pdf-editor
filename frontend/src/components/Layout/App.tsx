@@ -12,6 +12,16 @@ function UploadScreen({ onUpload }: { onUpload: (doc: PDFDocument, pdfUrl?: stri
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [shuttingDown, setShuttingDown] = useState(false);
+
+  const handleShutdown = useCallback(async () => {
+    setShuttingDown(true);
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/shutdown`, { method: 'POST' });
+    } catch {
+      window.close();
+    }
+  }, []);
 
   const handleFile = useCallback(async (file: File) => {
     if (!file || file.type !== 'application/pdf') {
@@ -84,6 +94,19 @@ function UploadScreen({ onUpload }: { onUpload: (doc: PDFDocument, pdfUrl?: stri
             {error}
           </div>
         )}
+
+        <div className="mt-8 text-center">
+          <button
+            onClick={handleShutdown}
+            disabled={shuttingDown}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            {shuttingDown ? 'Stopping...' : 'Stop Server'}
+          </button>
+        </div>
       </div>
     </div>
   );
