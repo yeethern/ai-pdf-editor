@@ -33,11 +33,16 @@
       padding: 1rem 2rem; border-radius: 12px; font-size: 1.1rem; font-weight: 600;
       text-decoration: none; transition: all 0.15s; gap: 0.5rem;
     }
-    .btn-primary { background: #000; color: #fff; border: none; }
-    .btn-primary:hover { background: #333; transform: translateY(-1px); }
+    .btn-mac { background: #000; color: #fff; border: none; }
+    .btn-mac:hover { background: #333; transform: translateY(-1px); }
+    .btn-win { background: #00a4ef; color: #fff; border: none; }
+    .btn-win:hover { background: #0086c4; transform: translateY(-1px); }
     .btn-secondary { background: #e8e8ed; color: #000; }
     .btn-secondary:hover { background: #d1d1d6; }
     .note { font-size: 0.85rem; color: #999; margin-top: 1.5rem; line-height: 1.6; }
+    .badge { display: inline-block; font-size: 0.7rem; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px; margin-left: 6px; }
+    .badge-mac { background: #e8e8ed; color: #666; }
+    .badge-win { background: #e0f0ff; color: #0078d4; }
   </style>
 </head>
 <body>
@@ -45,15 +50,25 @@
     <h1>AI PDF Editor</h1>
     <p>Download the desktop app to start editing PDFs with AI-powered OCR.</p>
     <div class="buttons">
-      <a class="btn btn-primary" href="https://github.com/yeethern/ai-pdf-editor/releases/latest/download/PDFEditor.zip" download>
+      <a class="btn btn-mac" href="https://github.com/yeethern/ai-pdf-editor/releases/latest/download/PDFEditor-macOS.zip">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14m0 0l-6-6m6 6l6-6"/>
         </svg>
-        Download (macOS & Windows)
+        Download for macOS
+      </a>
+      <a class="btn btn-win" href="https://github.com/yeethern/ai-pdf-editor/releases/latest/download/PDFEditor-Windows.zip">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14m0 0l-6-6m6 6l6-6"/>
+        </svg>
+        Download for Windows
       </a>
       <a class="btn btn-secondary" href="/">Launch Editor (requires backend)</a>
     </div>
-    <p class="note">After downloading, unzip and double-click the app. Your browser will open the editor.</p>
+    <p class="note">
+      After downloading, unzip and open the app. Your browser will open the editor.<br>
+      macOS: right-click → Open on first launch.<br>
+      Windows: double-click start.vbs.
+    </p>
   </div>
 </body>
 </html>

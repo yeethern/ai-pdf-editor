@@ -1,8 +1,15 @@
 import 'dotenv/config';
+import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+
+// Also load .env from ~/.pdf-editor/ (for the distributed .app bundle)
+const homeEnvPath = path.join(require('os').homedir(), '.pdf-editor', '.env');
+if (fs.existsSync(homeEnvPath)) {
+  dotenv.config({ path: homeEnvPath });
+}
 import { pdfRouter } from './routes/pdf';
 import { aiRouter } from './routes/ai';
 import { skillRouter } from './routes/skill';

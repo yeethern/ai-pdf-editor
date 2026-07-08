@@ -1,0 +1,77 @@
+name: Build Windows Distribution
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Create distribution structure
+        run: |
+          mkdir dist\backend\src
+          mkdir dist\frontend
+
+      - name: Copy backend files
+        run: |
+          copy backend\package.json dist\backend\
+          copy backend\tsconfig.json dist\backend\
+          xcopy /E /I backend\src dist\backend\src
+          if exist backend\fonts xcopy /E /I backend\fonts dist\backend\fonts
+
+      - name: Copy frontend build
+        run: |
+          xcopy /E /I frontend\dist dist\frontend
+
+      - name: Install backend dependencies
+        working-directory: dist\backend
+        run: |
+          npm install --omit=dev
+          npm install tsx --no-save
+          npm install @esbuild/win32-x64 --no-save
+
+      - name: Create launcher scripts
+        shell: pwsh
+        run: |
+          @"
+          @echo off
+          cd /d "%~dp0backend"
+          start "" http://localhost:3001
+          npx tsx src/index.ts
+          pause
+          "@ | Out-File -FilePath dist\start.bat -Encoding ASCII
+
+          @"
+          Set WshShell = CreateObject("WScript.Shell")
+          WshShell.CurrentDirectory = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName) & "\backend"
+          WshShell.Run "cmd /c npx tsx src\index.ts", 0, False
+          WScript.Sleep 2000
+          WshShell.Run "http://localhost:3001"
+          "@ | Out-File -FilePath dist\start.vbs -Encoding ASCII
+
+      - name: Create .env file
+        run: |
+          echo OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} > dist\backend\.env
+
+      - name: Zip distribution
+        run: |
+          cd dist
+          Compress-Archive -Path * -DestinationPath ..\PDFEditor-Windows.zip
+
+      - name: Upload to release
+        run: |
+          gh release upload v1.0.0 PDFEditor-Windows.zip --clobber

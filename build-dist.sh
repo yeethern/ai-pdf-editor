@@ -2,80 +2,103 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-DIST="$ROOT/PDFEditor-dist"
-NAME="PDFEditor"
+APP="$ROOT/PDFEditor.app"
+TEMP="$ROOT/.build-temp"
 
-echo "=== Building $NAME Distribution ==="
+echo "=== Building PDFEditor.app ==="
 echo ""
 
-# 1. Build frontend
-echo "[1/5] Building frontend..."
+# 1. Clean
+echo "[1/6] Cleaning..."
+rm -rf "$APP" "$TEMP" "$ROOT/PDFEditor.zip" "$ROOT/PDFEditor-Windows.zip"
+
+# 2. Build frontend
+echo "[2/6] Building frontend..."
 cd "$ROOT/frontend"
-npm run build
+npm run build 2>&1 | tail -3
 
-# 2. Prepare dist directory
-echo "[2/5] Creating distribution layout..."
-rm -rf "$DIST"
-mkdir -p "$DIST/backend"
-mkdir -p "$DIST/frontend"
-mkdir -p "$DIST/fonts"
+# 3. Create app bundle structure
+echo "[3/6] Creating app bundle..."
+mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/Resources/backend"
+mkdir -p "$APP/Contents/Resources/frontend"
 
-# 3. Copy frontend build
-echo "[3/5] Copying frontend build..."
-cp -R "$ROOT/frontend/dist/" "$DIST/frontend/"
+# 4. Copy files into bundle
+echo "[4/6] Copying files..."
 
-# 4. Copy backend source files
-echo "[4/5] Copying backend..."
-cp "$ROOT/backend/package.json" "$DIST/backend/"
-cp "$ROOT/backend/tsconfig.json" "$DIST/backend/"
-cp -R "$ROOT/backend/src" "$DIST/backend/src"
-cp "$ROOT/backend/eng.traineddata" "$DIST/backend/" 2>/dev/null || true
+# Backend source
+cp -R "$ROOT/backend/src" "$APP/Contents/Resources/backend/src"
+cp "$ROOT/backend/package.json" "$APP/Contents/Resources/backend/"
+cp "$ROOT/backend/tsconfig.json" "$APP/Contents/Resources/backend/"
+cp "$ROOT/backend/eng.traineddata" "$APP/Contents/Resources/backend/" 2>/dev/null || true
 
-# 5. Copy fonts
+# Fonts
 if [ -d "$ROOT/backend/fonts" ]; then
-  cp -R "$ROOT/backend/fonts/" "$DIST/fonts/"
+  cp -R "$ROOT/backend/fonts" "$APP/Contents/Resources/backend/fonts"
 fi
 
-# 6. Install production dependencies
-echo "[5/5] Installing backend dependencies..."
-cd "$DIST/backend"
-npm install --omit=dev --ignore-scripts 2>&1 | tail -3
+# Frontend build
+cp -R "$ROOT/frontend/dist" "$APP/Contents/Resources/frontend/"
 
-# Rebuild native modules (canvas, sharp need this)
-npx --yes node-gyp rebuild 2>/dev/null || true
-npx --yes @mapbox/node-pre-gyp rebuild 2>/dev/null || true
+# .env (API key, gitignored, bundled into the app for end users)
+if [ -f "$ROOT/backend/.env" ]; then
+  cp "$ROOT/backend/.env" "$APP/Contents/Resources/backend/.env"
+fi
 
-# 7. Create launchers
-echo ""
-echo "Creating launchers..."
+# 5. Install dependencies
+echo "[5/6] Installing backend dependencies..."
+cd "$APP/Contents/Resources/backend"
+npm install --omit=dev 2>&1 | tail -5
+npm install tsx --no-save 2>&1 | tail -3
 
-# Copy stop.command
-cp "$ROOT/stop.command" "$DIST/stop.command"
+# 6. Create launchers
+echo "[6/6] Creating launchers..."
 
-# macOS .command
-cat > "$DIST/start.command" << 'CMDECMD'
+# PkgInfo (required by macOS)
+echo "APPL????" > "$APP/Contents/PkgInfo"
+
+# macOS app executable
+cat > "$APP/Contents/MacOS/PDFEditor" << 'SCRIPT'
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
 cd "$DIR/backend"
-npx tsx src/index.ts
-CMDECMD
-chmod +x "$DIST/start.command"
 
-# macOS .app (shows in dock, right-click to Quit)
-mkdir -p "$DIST/PDFEditor.app/Contents/MacOS"
-cat > "$DIST/PDFEditor.app/Contents/MacOS/PDFEditor" << 'APPSH'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$DIR/backend"
-npx tsx src/index.ts &
-sleep 2
-open http://localhost:3001
-osascript -e 'display notification "PDF Editor is running. Click Quit from the dock to stop." with title "PDF Editor"' 2>/dev/null || true
+# Check if already running
+if lsof -ti :3001 &>/dev/null; then
+  osascript -e 'display dialog "PDF Editor is already running.\n\nOpen http://localhost:3001 in your browser." buttons {"OK"} default button 1 with title "PDF Editor"'
+  open http://localhost:3001
+  exit 0
+fi
+
+LOG="$HOME/Library/Logs/PDFEditor.log"
+NODE="/usr/local/bin/node"
+if [ ! -x "$NODE" ]; then
+  NODE="$(which node 2>/dev/null || echo "/usr/local/bin/node")"
+fi
+arch -arm64 "$NODE" node_modules/.bin/tsx src/index.ts > "$LOG" 2>&1 &
+PID=$!
+# Wait up to 30s for backend to respond
+for i in $(seq 1 30); do
+  if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 $PID 2>/dev/null; then
+    break
+  fi
+  sleep 1
+done
+if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+  open http://localhost:3001
+else
+  osascript -e "display dialog \"PDF Editor failed to start.\n\nCheck the log for details:\n$LOG\" buttons {\"OK\"} default button 1 with title \"PDF Editor\"" 2>/dev/null || \
+  osascript -e "display dialog \"PDF Editor failed to start. Check ~/Library/Logs/PDFEditor.log\" buttons {\"OK\"} default button 1 with title \"PDF Editor\""
+fi
 wait
-APPSH
-chmod +x "$DIST/PDFEditor.app/Contents/MacOS/PDFEditor"
+SCRIPT
+chmod +x "$APP/Contents/MacOS/PDFEditor"
 
-cat > "$DIST/PDFEditor.app/Contents/Info.plist" << 'PLIST'
+# Info.plist
+cat > "$APP/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -90,21 +113,28 @@ cat > "$DIST/PDFEditor.app/Contents/Info.plist" << 'PLIST'
     <string>1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>PDF Editor</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
 </dict>
 </plist>
 PLIST
 
-# Windows .vbs (runs hidden)
-cat > "$DIST/start.vbs" << 'VBS'
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.CurrentDirectory = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName) & "\backend"
-WshShell.Run "cmd /c npx tsx src\index.ts", 0, False
-WScript.Sleep 2000
-WshShell.Run "http://localhost:3001"
-VBS
+# Windows batch launcher
+mkdir -p "$TEMP"
+cat > "$TEMP/start.command" << 'CMDECMD'
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR/backend"
+node node_modules/.bin/tsx src/index.ts
+CMDECMD
 
-# Windows .bat (shows terminal, fallback)
-cat > "$DIST/start.bat" << 'BAT'
+cat > "$TEMP/start.bat" << 'BAT'
 @echo off
 cd /d "%~dp0backend"
 start "" http://localhost:3001
@@ -112,25 +142,57 @@ npx tsx src/index.ts
 pause
 BAT
 
-# 8. Create zip
-echo ""
-echo "Creating zip..."
-cd "$ROOT"
-rm -f "$NAME.zip"
-zip -r "$NAME.zip" "$(basename "$DIST")" -x "*/node_modules/.cache/*" "*/node_modules/.package-lock.json" > /dev/null 2>&1
+cat > "$TEMP/start.vbs" << 'VBS'
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.CurrentDirectory = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName) & "\backend"
+WshShell.Run "cmd /c npx tsx src\index.ts", 0, False
+WScript.Sleep 2000
+WshShell.Run "http://localhost:3001"
+VBS
 
-# Summary
-SIZE=$(du -sh "$DIST" | cut -f1)
-ZIP_SIZE=$(du -h "$NAME.zip" | cut -f1)
+# Create macOS zip (app only)
+echo ""
+echo "Creating PDFEditor.zip (macOS)..."
+cd "$ROOT"
+zip -ry "PDFEditor.zip" "PDFEditor.app" -x "*/node_modules/.cache/*" > /dev/null 2>&1
+
+# Create Windows zip (backend + launchers)
+echo "Creating PDFEditor-Windows.zip (Windows)..."
+mkdir -p "$TEMP/backend" "$TEMP/frontend"
+cp "$TEMP/start.bat" "$TEMP/"
+cp "$TEMP/start.vbs" "$TEMP/"
+cp -R "$ROOT/backend/src" "$TEMP/backend/src"
+cp "$ROOT/backend/package.json" "$TEMP/backend/"
+cp "$ROOT/backend/tsconfig.json" "$TEMP/backend/"
+cp -R "$ROOT/backend/fonts" "$TEMP/backend/" 2>/dev/null || true
+cp -R "$ROOT/frontend/dist/" "$TEMP/frontend/"
+cd "$TEMP"
+npm install --prefix backend --omit=dev 2>&1 | tail -1
+npm install --prefix backend tsx --no-save 2>&1 | tail -1
+npm install --prefix backend @esbuild/win32-x64 --no-save 2>/dev/null || true
+zip -r "$ROOT/PDFEditor-Windows.zip" . -x "*/node_modules/.cache/*" > /dev/null 2>&1
+
+# Cleanup
+rm -rf "$TEMP"
+
+# Sizes
+APP_SIZE=$(du -sh "$APP" | cut -f1)
+ZIP_SIZE=$(du -h "$ROOT/PDFEditor.zip" | cut -f1)
+WIN_SIZE=$(du -h "$ROOT/PDFEditor-Windows.zip" | cut -f1 2>/dev/null || echo "N/A")
+
 echo ""
 echo "=== Done ==="
-echo "  Distribution folder: $DIST ($SIZE)"
-echo "  Zip archive: $ROOT/$NAME.zip ($ZIP_SIZE)"
+echo "  macOS app: $APP_SIZE"
+echo "  macOS zip: $ZIP_SIZE"
+echo "  Windows zip: $WIN_SIZE"
 echo ""
-echo "To distribute:"
-echo "  macOS: Upload PDFEditor.zip, users download, unzip, double-click PDFEditor.app"
-echo "  To stop: double-click stop.command, or right-click PDFEditor.app in dock → Quit"
-echo "  Windows: Users unzip, double-click start.vbs (hidden) or start.bat (terminal)"
+echo "How to use:"
+echo "  macOS: Unzip PDFEditor.zip → double-click PDFEditor.app"
+echo "  Windows: Unzip PDFEditor-Windows.zip → double-click start.vbs"
 echo ""
-echo "Users need Node.js installed."
-echo "On first run, 'npx tsx' will auto-install tsx."
+echo "Note: macOS will show \"unverified developer\" on first launch."
+echo "  Right-click PDFEditor.app → Open → click Open."
+echo "  After that, just double-click to open."
+echo ""
+echo "Users need Node.js installed (https://nodejs.org)."
+echo "On first run, 'npx tsx' will auto-install (one-time)."
