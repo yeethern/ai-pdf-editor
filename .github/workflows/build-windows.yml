@@ -1,4 +1,4 @@
-name: Build Windows Distribution
+name: Build Distribution
 
 on:
   workflow_dispatch:
@@ -8,7 +8,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -19,19 +22,31 @@ jobs:
           node-version: 22
 
       - name: Build frontend
-        shell: pwsh
+        shell: bash
         run: |
           cd frontend
           npm install
           npm run build
 
+      # macOS build — uses the existing build-dist.sh script
+      - name: Build macOS distribution
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > backend/.env
+          bash build-dist.sh
+          mv PDFEditor.zip PDFEditor-macOS.zip
+
+      # Windows build — inline pwsh steps
       - name: Create distribution structure
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           mkdir dist\backend\src -Force
           mkdir dist\frontend -Force
 
       - name: Copy backend files
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           Copy-Item backend\package.json dist\backend\
@@ -40,11 +55,13 @@ jobs:
           if (Test-Path backend\fonts) { Copy-Item -Recurse backend\fonts dist\backend\fonts }
 
       - name: Copy frontend build
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           Copy-Item -Recurse frontend\dist dist\frontend
 
       - name: Install backend dependencies
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         working-directory: dist\backend
         run: |
@@ -53,6 +70,7 @@ jobs:
           npm install @esbuild/win32-x64 --no-save
 
       - name: Create launcher scripts
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           @"
@@ -72,17 +90,24 @@ jobs:
           "@ | Out-File -FilePath dist\start.vbs -Encoding ASCII
 
       - name: Create .env file
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" | Out-File -FilePath dist\backend\.env -Encoding ASCII
 
-      - name: Zip distribution
+      - name: Zip Windows distribution
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           cd dist
           Compress-Archive -Path * -DestinationPath ..\PDFEditor-Windows.zip
 
-      - name: Upload to release
+      - name: Upload macOS distribution
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: gh release upload v1.0.0 PDFEditor-macOS.zip --clobber
+
+      - name: Upload Windows distribution
+        if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          gh release upload v1.0.0 PDFEditor-Windows.zip --clobber
+        run: gh release upload v1.0.0 PDFEditor-Windows.zip --clobber
