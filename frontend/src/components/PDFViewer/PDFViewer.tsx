@@ -760,6 +760,80 @@ export function PDFViewer() {
           });
         })()}
 
+        {/* QR code cover rectangles */}
+        {doc?.qrCodeCoverActions?.map(action => {
+          const inRange = currentPage >= (action.pageRange.from - 1) && currentPage <= (action.pageRange.to - 1);
+          if (!inRange || !action.coverQR) return null;
+
+          const qrsOnPage = (doc.detectedQRCodes || []).filter(q => q.page === currentPage);
+          if (qrsOnPage.length === 0) return null;
+
+          return qrsOnPage.map(qr => {
+            const padding = 10;
+            const paddedBbox: [number, number, number, number] = [
+              qr.bbox[0] - padding,
+              qr.bbox[1] - padding,
+              qr.bbox[2] + padding * 2,
+              qr.bbox[3] + padding * 2,
+            ];
+            const { bg } = extractColorsFromPage(
+              `qr-${qr.id}`, paddedBbox[0], paddedBbox[1], paddedBbox[2], paddedBbox[3],
+            );
+
+            const qrBottom = qr.bbox[1] + qr.bbox[3];
+            const qrLeft = qr.bbox[0];
+            const qrRight = qr.bbox[0] + qr.bbox[2];
+            const coverDescElements = action.coverDesc
+              ? (() => {
+                  let closest: TextElement | null = null;
+                  let minGap = Infinity;
+                  for (const el of textEls) {
+                    const [ex, ey, ew] = el.bbox;
+                    const elRight = ex + ew;
+                    if (ey < qrBottom) continue;
+                    if (elRight < qrLeft || ex > qrRight) continue;
+                    const gap = ey - qrBottom;
+                    if (gap < minGap) {
+                      minGap = gap;
+                      closest = el;
+                    }
+                  }
+                  return closest ? [closest] : [];
+                })()
+              : [];
+
+            return (
+              <div key={qr.id}>
+                <div style={{
+                  position: 'absolute',
+                  left: paddedBbox[0] * zoom,
+                  top: paddedBbox[1] * zoom,
+                  width: paddedBbox[2] * zoom,
+                  height: paddedBbox[3] * zoom,
+                  background: bg,
+                  zIndex: 12,
+                  pointerEvents: 'none',
+                }} />
+                {coverDescElements.map(el => {
+                  const [ex, ey, ew, eh] = el.bbox;
+                  return (
+                    <div key={el.id} style={{
+                      position: 'absolute',
+                      left: ex * zoom,
+                      top: ey * zoom,
+                      width: ew * zoom,
+                      height: eh * zoom,
+                      background: bg,
+                      zIndex: 12,
+                      pointerEvents: 'none',
+                    }} />
+                  );
+                })}
+              </div>
+            );
+          });
+        })}
+
         {/* Image overlays */}
         {doc?.overlays?.map(overlay => {
           const inRange = currentPage >= (overlay.pageRange.from - 1) && currentPage <= (overlay.pageRange.to - 1);

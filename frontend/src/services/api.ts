@@ -1,4 +1,4 @@
-import { PDFDocument, PageElement, TransformationResult, SkillFile, EntityDetection, StyleRule, ImageOverlay } from '../types';
+import { PDFDocument, PageElement, TransformationResult, SkillFile, EntityDetection, StyleRule, ImageOverlay, DetectedQRCode, QRCodeCoverAction } from '../types';
 import { API_BASE } from '../config';
 
 const BASE = API_BASE;
@@ -165,6 +165,20 @@ export const api = {
     const res = await fetch(`${BASE}/pdf/uploads/image`, { method: 'POST', body: form });
     if (!res.ok) throw new Error('Image upload failed');
     return res.json();
+  },
+
+  async detectQRCodes(docId: string, pages?: number[]): Promise<{ qr: DetectedQRCode[] }> {
+    return request(`/pdf/${docId}/detect-qr`, {
+      method: 'POST',
+      body: JSON.stringify({ pages }),
+    });
+  },
+
+  async applyQRCodeCovers(docId: string, actions: QRCodeCoverAction[]): Promise<{ success: boolean; document: PDFDocument }> {
+    return request(`/pdf/${docId}/apply-qr-covers`, {
+      method: 'POST',
+      body: JSON.stringify({ actions }),
+    });
   },
 
   async applyOverlays(docId: string, overlays: ImageOverlay[]): Promise<{ success: boolean; document: PDFDocument }> {

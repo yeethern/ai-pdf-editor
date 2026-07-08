@@ -47,6 +47,22 @@ export interface ImageOverlay {
   pageRange: { from: number; to: number };
 }
 
+export interface DetectedQRCode {
+  id: string;
+  page: number;
+  content: string;
+  bbox: [number, number, number, number];
+  corners?: [number, number][];
+}
+
+export interface QRCodeCoverAction {
+  id: string;
+  coverQR: boolean;
+  coverDesc: boolean;
+  color: string;
+  pageRange: { from: number; to: number };
+}
+
 export interface PDFDocument {
   id: string;
   name: string;
@@ -57,6 +73,8 @@ export interface PDFDocument {
     pageCount: number;
   };
   overlays: ImageOverlay[];
+  detectedQRCodes?: DetectedQRCode[];
+  qrCodeCoverActions?: QRCodeCoverAction[];
 }
 
 export interface SkillRule {

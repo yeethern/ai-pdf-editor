@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuid } from 'uuid';
 import { createCanvas } from 'canvas';
-import { PDFDocument, PDFPage, TextElement, PageElement, ColumnBoundary } from '../../types';
+import { PDFDocument, PDFPage, TextElement, PageElement, ColumnBoundary, DetectedQRCode } from '../../types';
 import { ocrPage, splitCrossColumnItems, getRecommendedScale } from './ocr';
+import { detectQRCode } from './qrDetector';
+import { renderPage } from './renderer';
 import { groupElements, LogFn } from '../ai/service';
 
 const pdfjsLib = require('pdfjs-dist');
@@ -413,6 +415,31 @@ export function getOriginalPath(docId: string): string | undefined {
   return originalPaths.get(docId);
 }
 
+async function detectQRCodesForDoc(docId: string, procCount: number, onLog?: LogFn): Promise<DetectedQRCode[]> {
+  const filePath = getOriginalPath(docId);
+  if (!filePath) return [];
+
+  const allQRCodes: DetectedQRCode[] = [];
+  for (let i = 1; i <= procCount; i++) {
+    try {
+      const renderScale = 0.75;
+      const buffer = await renderPage(filePath, i, renderScale);
+      const qrCodes = await detectQRCode(buffer, renderScale, i - 1);
+      allQRCodes.push(...qrCodes);
+    } catch (e) {
+      console.error(`QR detection failed for page ${i}:`, e);
+    }
+  }
+
+  if (allQRCodes.length > 0) {
+    const qrMsg = `QR detection: found ${allQRCodes.length} code${allQRCodes.length !== 1 ? 's' : ''} across ${procCount} pages`;
+    console.log(qrMsg);
+    onLog?.('page', qrMsg);
+  }
+
+  return allQRCodes;
+}
+
 async function processOnePage(page: any, pageNum: number, pageWidth: number, pageHeight: number, onLog?: import('../ai/service').LogFn): Promise<PageElement[]> {
   const textContent: TextContent = await page.getTextContent();
   let rawElements: TextElement[] = [];
@@ -521,6 +548,8 @@ export async function parsePDF(filePath: string, maxPages?: number, onLog?: impo
   const docName = path.basename(filePath);
   originalPaths.set(docId, filePath);
 
+  const detectedQRCodes = await detectQRCodesForDoc(docId, procCount, onLog);
+
   return {
     id: docId,
     name: docName,
@@ -530,6 +559,7 @@ export async function parsePDF(filePath: string, maxPages?: number, onLog?: impo
       title: docName,
     },
     overlays: [],
+    detectedQRCodes,
   };
 }
 
@@ -547,7 +577,26 @@ export async function processPage(pageIndex: number, document: PDFDocument, onLo
   const pageWidth = Math.round(viewport.width);
   const pageHeight = Math.round(viewport.height);
 
-  return await processOnePage(pdfPage, pageIndex, pageWidth, pageHeight, onLog);
+  const elements = await processOnePage(pdfPage, pageIndex, pageWidth, pageHeight, onLog);
+
+  // Also run QR detection for this page
+  try {
+    const renderScale = 0.75;
+    const buffer = await renderPage(filePath, pageIndex + 1, renderScale);
+    const qrCodes = await detectQRCode(buffer, renderScale, pageIndex);
+    if (qrCodes.length > 0) {
+      const existing = document.detectedQRCodes || [];
+      const filtered = existing.filter(q => q.page !== pageIndex);
+      document.detectedQRCodes = [...filtered, ...qrCodes];
+      const qrMsg = `QR detection: found ${qrCodes.length} code${qrCodes.length !== 1 ? 's' : ''} on page ${pageIndex + 1}`;
+      console.log(qrMsg);
+      onLog?.('page', qrMsg);
+    }
+  } catch (e) {
+    console.error(`QR detection failed for page ${pageIndex}:`, e);
+  }
+
+  return elements;
 }
 
 export function saveDocument(document: PDFDocument): void {

@@ -6,7 +6,8 @@ import { parsePDF, processPage, saveDocument, loadDocument, updateElement, getOr
 import { renderPage } from '../services/pdf/renderer';
 import { bulkStyle } from '../services/pdf/bulkStyle';
 import { exportPdf } from '../services/pdf/exportPdf';
-import { PDFDocument, StyleRule, ImageOverlay } from '../types';
+import { detectQRCode } from '../services/pdf/qrDetector';
+import { PDFDocument, StyleRule, ImageOverlay, QRCodeCoverAction, DetectedQRCode } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 const upload = multer({
@@ -265,6 +266,67 @@ pdfRouter.get('/uploads/:filename', (req: Request, res: Response) => {
     return;
   }
   res.sendFile(filePath);
+});
+
+pdfRouter.post('/:id/detect-qr', async (req: Request, res: Response) => {
+  try {
+    const doc = loadDocument(req.params.id);
+    if (!doc) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    const { pages } = req.body as { pages?: number[] };
+    const pageNums = pages && pages.length > 0
+      ? pages
+      : [0];
+
+    const allQRCodes: DetectedQRCode[] = [];
+
+    for (const pageNum of pageNums) {
+      if (pageNum < 0 || pageNum >= (doc.metadata?.pageCount || 1)) continue;
+
+      const originalPath = getOriginalPath(req.params.id);
+      if (!originalPath) continue;
+
+      const renderScale = 0.75;
+      const buffer = await renderPage(originalPath, pageNum + 1, renderScale);
+      const qrCodes = await detectQRCode(buffer, renderScale, pageNum);
+      allQRCodes.push(...qrCodes);
+    }
+
+    doc.detectedQRCodes = allQRCodes;
+    saveDocument(doc);
+
+    res.json({ qr: allQRCodes });
+  } catch (err) {
+    console.error('QR detection failed:', err);
+    res.status(500).json({ error: 'QR detection failed' });
+  }
+});
+
+pdfRouter.post('/:id/apply-qr-covers', (req: Request, res: Response) => {
+  try {
+    const { actions } = req.body as { actions: QRCodeCoverAction[] };
+    if (!Array.isArray(actions)) {
+      res.status(400).json({ error: 'Actions array is required' });
+      return;
+    }
+
+    const doc = loadDocument(req.params.id);
+    if (!doc) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    doc.qrCodeCoverActions = actions;
+    saveDocument(doc);
+
+    res.json({ success: true, document: doc });
+  } catch (err) {
+    console.error('Apply QR covers failed:', err);
+    res.status(500).json({ error: 'Apply QR covers failed' });
+  }
 });
 
 pdfRouter.get('/', (_req: Request, res: Response) => {

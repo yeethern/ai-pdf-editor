@@ -7,6 +7,8 @@ import {
   TransformationResult,
   HistoryEntry,
   ImageOverlay,
+  DetectedQRCode,
+  QRCodeCoverAction,
 } from '../types';
 
 interface EditorActions {
@@ -29,13 +31,15 @@ interface EditorActions {
   redo: () => void;
   resetToOriginal: () => void;
   applyTransformation: (transformed: string) => void;
+  addElement: (page: number, element: PageElement) => void;
   markElementEdited: (id: string) => void;
   unmarkElementEdited: (id: string) => void;
   clearEditedIds: () => void;
   updateOverlays: (overlays: ImageOverlay[]) => void;
   updateOverlay: (id: string, patch: Partial<ImageOverlay>) => void;
   removeOverlay: (id: string) => void;
-  addElement: (page: number, element: PageElement) => void;
+  setDetectedQRCodes: (qrCodes: DetectedQRCode[]) => void;
+  setQRCodeCoverActions: (actions: QRCodeCoverAction[]) => void;
 }
 
 type EditorStore = EditorState & EditorActions;
@@ -253,6 +257,22 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       historyIndex: newIndex,
       selectedElementId: null,
     });
+  },
+
+  setDetectedQRCodes: (qrCodes) => {
+    const state = get();
+    if (!state.document) return;
+    const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+    doc.detectedQRCodes = qrCodes;
+    set({ document: doc });
+  },
+
+  setQRCodeCoverActions: (actions) => {
+    const state = get();
+    if (!state.document) return;
+    const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+    doc.qrCodeCoverActions = actions;
+    set({ document: doc });
   },
 
   applyTransformation: (transformed) => {

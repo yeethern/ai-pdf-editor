@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { Condition, Action, StyleRule, ImageOverlay, PDFDocument } from '../../types';
 import { OverlayPreviewCanvas } from './OverlayPreviewCanvas';
 import { ProductCodeEditor } from './ProductCodeEditor';
+import { QRPanel } from '../QRPanel/QRPanel';
 import { API_BASE } from '../../config';
 
 interface CondForm {
@@ -177,7 +178,7 @@ function emptyRule(): RuleForm {
 
 export function StylePanel() {
   const { document, pdfUrl, pushHistory, markElementEdited, setDocument } = useEditorStore();
-  const [activeTab, setActiveTab] = useState<'rules' | 'overlays' | 'productCodes'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'overlays' | 'productCodes' | 'qr'>('rules');
 
   // Rules state
   const [rules, setRules] = useState<RuleForm[]>([emptyRule()]);
@@ -305,6 +306,9 @@ export function StylePanel() {
         </button>
         <button className={`text-xs px-3 py-1.5 ${activeTab === 'productCodes' ? 'text-brand-600 border-b-2 border-brand-600 font-medium' : 'text-gray-500'}`} onClick={() => setActiveTab('productCodes')}>
           Product Code
+        </button>
+        <button className={`text-xs px-3 py-1.5 ${activeTab === 'qr' ? 'text-brand-600 border-b-2 border-brand-600 font-medium' : 'text-gray-500'}`} onClick={() => setActiveTab('qr')}>
+          QR Code
         </button>
       </div>
 
@@ -452,6 +456,8 @@ export function StylePanel() {
             {applying ? 'Applying...' : 'Apply Overlays'}
           </button>
         </div>
+      ) : activeTab === 'qr' ? (
+        <QRPanel />
       ) : (
         <ProductCodeEditor />
       )}

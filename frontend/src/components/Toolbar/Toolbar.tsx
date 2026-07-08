@@ -1,5 +1,5 @@
 import { useEditorStore } from '../../store';
-import { TextElement } from '../../types';
+import { TextElement, DetectedQRCode, QRCodeCoverAction } from '../../types';
 import { sampleColors } from '../../utils/colors';
 import { API_BASE } from '../../config';
 
@@ -40,7 +40,9 @@ async function renderPageBlob(
   pageIndex: number,
   pageWidth: number,
   pageHeight: number,
-  scale: number
+  scale: number,
+  qrCoverActions?: QRCodeCoverAction[],
+  qrCodes?: DetectedQRCode[],
 ): Promise<Blob> {
   const cw = pageWidth * scale;
   const ch = pageHeight * scale;
@@ -89,6 +91,44 @@ async function renderPageBlob(
     const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
     const visualCenter = metrics.actualBoundingBoxAscent - textHeight / 2;
     ctx.fillText(el.content, sx + sw / 2, sy + sh / 2 + visualCenter);
+  }
+
+  // QR cover rectangles
+  if (qrCoverActions && qrCodes) {
+    for (const action of qrCoverActions) {
+      const inRange = pageIndex >= (action.pageRange.from - 1) && pageIndex <= (action.pageRange.to - 1);
+      if (!inRange || !action.coverQR) continue;
+
+      const qrs = qrCodes.filter(q => q.page === pageIndex);
+      for (const qr of qrs) {
+        const [qx, qy, qw, qh] = qr.bbox;
+        const padding = 10;
+        const padBbox = [qx - padding, qy - padding, qw + padding * 2, qh + padding * 2];
+        const colors = sampleFromImage(pageImg, padBbox[0], padBbox[1], padBbox[2], padBbox[3], scale);
+        ctx.fillStyle = colors.bg || action.color;
+        ctx.fillRect(padBbox[0] * scale, padBbox[1] * scale, padBbox[2] * scale, padBbox[3] * scale);
+
+        if (action.coverDesc) {
+          const qrBottom = qy + qh;
+          let closest: TextElement | null = null;
+          let minGap = Infinity;
+          for (const el of elements) {
+            const [ex, ey, ew] = el.bbox;
+            const elRight = ex + ew;
+            if (ey < qrBottom) continue;
+            if (elRight < qx || ex > qx + qw) continue;
+            const gap = ey - qrBottom;
+            if (gap < minGap) { minGap = gap; closest = el; }
+          }
+          if (closest) {
+            const [cex, cey, cew, ceh] = closest.bbox;
+            const descColors = sampleFromImage(pageImg, cex, cey, cew, ceh, scale);
+            ctx.fillStyle = descColors.bg || action.color;
+            ctx.fillRect(cex * scale, cey * scale, cew * scale, ceh * scale);
+          }
+        }
+      }
+    }
   }
 
   for (const overlay of overlays) {
@@ -174,7 +214,9 @@ export function Toolbar() {
         pi,
         pw,
         ph,
-        scale
+        scale,
+        document.qrCodeCoverActions,
+        document.detectedQRCodes,
       );
 
       formData.append(`page_${pi}`, blob, `page_${pi}.png`);
