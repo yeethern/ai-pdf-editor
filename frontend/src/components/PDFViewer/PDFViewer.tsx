@@ -477,26 +477,25 @@ export function PDFViewer() {
       } else if (drag.mode === 'resize' && drag.corner) {
         const patch: Record<string, number> = {};
         switch (drag.corner) {
-          case 'tl':
-            patch.x = drag.startOX + dx;
-            patch.y = drag.startOY + dy;
-            patch.width = drag.startOW - dx;
-            patch.height = drag.startOH - dy;
+          case 'tl': case 'tr': case 'bl': case 'br': {
+            const ratio = drag.startOW / drag.startOH;
+            let nw: number, nh: number;
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              nw = drag.corner === 'tr' || drag.corner === 'br' ? drag.startOW + dx : drag.startOW - dx;
+              nh = nw / ratio;
+            } else {
+              nh = drag.corner === 'bl' || drag.corner === 'br' ? drag.startOH + dy : drag.startOH - dy;
+              nw = nh * ratio;
+            }
+            if (nw < 5) { nw = 5; nh = nw / ratio; }
+            if (nh < 5) { nh = 5; nw = nh * ratio; }
+            patch.width = nw; patch.height = nh;
+            if (drag.corner === 'tl') { patch.x = drag.startOX + drag.startOW - nw; patch.y = drag.startOY + drag.startOH - nh; }
+            else if (drag.corner === 'tr') { patch.x = drag.startOX; patch.y = drag.startOY + drag.startOH - nh; }
+            else if (drag.corner === 'bl') { patch.x = drag.startOX + drag.startOW - nw; patch.y = drag.startOY; }
+            else { patch.x = drag.startOX; patch.y = drag.startOY; }
             break;
-          case 'tr':
-            patch.y = drag.startOY + dy;
-            patch.width = drag.startOW + dx;
-            patch.height = drag.startOH - dy;
-            break;
-          case 'bl':
-            patch.x = drag.startOX + dx;
-            patch.width = drag.startOW - dx;
-            patch.height = drag.startOH + dy;
-            break;
-          case 'br':
-            patch.width = drag.startOW + dx;
-            patch.height = drag.startOH + dy;
-            break;
+          }
           case 't':
             patch.y = drag.startOY + dy;
             patch.height = drag.startOH - dy;
@@ -511,14 +510,6 @@ export function PDFViewer() {
           case 'r':
             patch.width = drag.startOW + dx;
             break;
-        }
-        if (patch.width !== undefined && patch.width < 5) {
-          patch.width = 5;
-          if (patch.x !== undefined) patch.x = drag.startOX + drag.startOW - 5;
-        }
-        if (patch.height !== undefined && patch.height < 5) {
-          patch.height = 5;
-          if (patch.y !== undefined) patch.y = drag.startOY + drag.startOH - 5;
         }
         updateOverlay(drag.id, patch);
       } else if (drag.mode === 'rotate') {
@@ -562,10 +553,22 @@ export function PDFViewer() {
         ny = drag.startBY + dy;
       } else if (drag.mode === 'resize' && drag.corner) {
         switch (drag.corner) {
-          case 'tl': nx = drag.startBX + dx; ny = drag.startBY + dy; nw = drag.startBW - dx; nh = drag.startBH - dy; break;
-          case 'tr': ny = drag.startBY + dy; nw = drag.startBW + dx; nh = drag.startBH - dy; break;
-          case 'bl': nx = drag.startBX + dx; nw = drag.startBW - dx; nh = drag.startBH + dy; break;
-          case 'br': nw = drag.startBW + dx; nh = drag.startBH + dy; break;
+          case 'tl': case 'tr': case 'bl': case 'br': {
+            const ratio = drag.startBW / drag.startBH;
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              nw = drag.corner === 'tr' || drag.corner === 'br' ? drag.startBW + dx : drag.startBW - dx;
+              nh = nw / ratio;
+            } else {
+              nh = drag.corner === 'bl' || drag.corner === 'br' ? drag.startBH + dy : drag.startBH - dy;
+              nw = nh * ratio;
+            }
+            if (nw < 20) { nw = 20; nh = nw / ratio; }
+            if (nh < 20) { nh = 20; nw = nh * ratio; }
+            if (drag.corner === 'tl') { nx = drag.startBX + drag.startBW - nw; ny = drag.startBY + drag.startBH - nh; }
+            else if (drag.corner === 'tr') { ny = drag.startBY + drag.startBH - nh; }
+            else if (drag.corner === 'bl') { nx = drag.startBX + drag.startBW - nw; }
+            break;
+          }
           case 't': ny = drag.startBY + dy; nh = drag.startBH - dy; break;
           case 'b': nh = drag.startBH + dy; break;
           case 'l': nx = drag.startBX + dx; nw = drag.startBW - dx; break;
@@ -613,7 +616,7 @@ export function PDFViewer() {
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-auto bg-gray-100 select-none" onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}>
-      <div ref={pageRef} className="relative mx-auto bg-white shadow-xl" style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }}>
+      <div ref={pageRef} className="relative mx-auto bg-white shadow-xl overflow-hidden" style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }}>
         
         <img ref={imgRef} src={imgUrl!} alt="" className="block pointer-events-none select-none" style={{ width: pw, height: ph }} draggable={false} onLoad={() => setRenderTick(n => n + 1)} />
 

@@ -30,7 +30,7 @@ export function OverlayPreviewCanvas({
   const [dragging, setDragging] = useState<'move' | 'resize' | 'rotate' | null>(null);
   const dragStartRef = useRef({ mx: 0, my: 0, x: 0, y: 0, w: 0, h: 0, rot: 0, corner: '' });
 
-  const scale = Math.min(1, 360 / pageWidth);
+  const scale = Math.min(1, 336 / pageWidth);
   const pw = pageWidth * scale;
   const ph = pageHeight * scale;
   const ox = x * scale;
@@ -56,21 +56,25 @@ export function OverlayPreviewCanvas({
       } else if (dragging === 'resize') {
         const patch: Record<string, number> = {};
         switch (ds.corner) {
-          case 'tl':
-            patch.x = ds.x + dx; patch.y = ds.y + dy;
-            patch.width = ds.w - dx; patch.height = ds.h - dy;
+          case 'tl': case 'tr': case 'bl': case 'br': {
+            const ratio = ds.w / ds.h;
+            let nw: number, nh: number;
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              nw = ds.corner === 'tr' || ds.corner === 'br' ? ds.w + dx : ds.w - dx;
+              nh = nw / ratio;
+            } else {
+              nh = ds.corner === 'bl' || ds.corner === 'br' ? ds.h + dy : ds.h - dy;
+              nw = nh * ratio;
+            }
+            if (nw < 5) { nw = 5; nh = nw / ratio; }
+            if (nh < 5) { nh = 5; nw = nh * ratio; }
+            patch.width = nw; patch.height = nh;
+            if (ds.corner === 'tl') { patch.x = ds.x + ds.w - nw; patch.y = ds.y + ds.h - nh; }
+            else if (ds.corner === 'tr') { patch.x = ds.x; patch.y = ds.y + ds.h - nh; }
+            else if (ds.corner === 'bl') { patch.x = ds.x + ds.w - nw; patch.y = ds.y; }
+            else { patch.x = ds.x; patch.y = ds.y; }
             break;
-          case 'tr':
-            patch.y = ds.y + dy;
-            patch.width = ds.w + dx; patch.height = ds.h - dy;
-            break;
-          case 'bl':
-            patch.x = ds.x + dx;
-            patch.width = ds.w - dx; patch.height = ds.h + dy;
-            break;
-          case 'br':
-            patch.width = ds.w + dx; patch.height = ds.h + dy;
-            break;
+          }
           case 't':
             patch.y = ds.y + dy; patch.height = ds.h - dy;
             break;
@@ -83,14 +87,6 @@ export function OverlayPreviewCanvas({
           case 'r':
             patch.width = ds.w + dx;
             break;
-        }
-        if (patch.width !== undefined && patch.width < 5) {
-          patch.width = 5;
-          if (patch.x !== undefined) patch.x = ds.x + ds.w - 5;
-        }
-        if (patch.height !== undefined && patch.height < 5) {
-          patch.height = 5;
-          if (patch.y !== undefined) patch.y = ds.y + ds.h - 5;
         }
         onTransformChange(patch);
       } else if (dragging === 'rotate') {
@@ -112,7 +108,7 @@ export function OverlayPreviewCanvas({
 
   return (
     <div className="space-y-2">
-      <div ref={containerRef} className="relative bg-white border border-gray-300 rounded overflow-hidden" style={{ width: pw, height: ph, margin: '0 auto' }}>
+      <div ref={containerRef} className="relative bg-white rounded overflow-hidden" style={{ width: pw, height: ph, margin: '0 auto', boxShadow: '0 0 0 1px #d1d5db' }}>
         {pageImageUrl ? (
           <img src={pageImageUrl} alt="" className="absolute inset-0 w-full h-full pointer-events-none select-none" draggable={false} />
         ) : (
@@ -126,7 +122,7 @@ export function OverlayPreviewCanvas({
             transform: `rotate(${rotation}deg)`,
             transformOrigin: 'center center',
             opacity,
-            border: dragging ? '2px solid #6366f1' : '2px solid transparent',
+            outline: dragging ? '2px solid #6366f1' : 'none',
           }}
           onMouseDown={e => handleMD(e, 'move')}
         >

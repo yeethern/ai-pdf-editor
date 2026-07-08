@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store';
 import { api } from '../../services/api';
 import { Condition, Action, StyleRule, ImageOverlay, PDFDocument } from '../../types';
 import { OverlayPreviewCanvas } from './OverlayPreviewCanvas';
+import { ProductCodeEditor } from './ProductCodeEditor';
 import { API_BASE } from '../../config';
 
 interface CondForm {
@@ -176,7 +177,7 @@ function emptyRule(): RuleForm {
 
 export function StylePanel() {
   const { document, pdfUrl, pushHistory, markElementEdited, setDocument } = useEditorStore();
-  const [activeTab, setActiveTab] = useState<'rules' | 'overlays'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'overlays' | 'productCodes'>('rules');
 
   // Rules state
   const [rules, setRules] = useState<RuleForm[]>([emptyRule()]);
@@ -302,6 +303,9 @@ export function StylePanel() {
         <button className={`text-xs px-3 py-1.5 ${activeTab === 'overlays' ? 'text-brand-600 border-b-2 border-brand-600 font-medium' : 'text-gray-500'}`} onClick={() => setActiveTab('overlays')}>
           Add Image Overlay
         </button>
+        <button className={`text-xs px-3 py-1.5 ${activeTab === 'productCodes' ? 'text-brand-600 border-b-2 border-brand-600 font-medium' : 'text-gray-500'}`} onClick={() => setActiveTab('productCodes')}>
+          Product Code
+        </button>
       </div>
 
       {activeTab === 'rules' ? (
@@ -407,7 +411,7 @@ export function StylePanel() {
             </div>
           )}
         </div>
-      ) : (
+      ) : activeTab === 'overlays' ? (
         <div className="space-y-3">
           {overlays.map((overlay, idx) => (
             <div key={overlay.id} className="p-2 bg-gray-50 rounded-lg border border-gray-200">
@@ -448,6 +452,8 @@ export function StylePanel() {
             {applying ? 'Applying...' : 'Apply Overlays'}
           </button>
         </div>
+      ) : (
+        <ProductCodeEditor />
       )}
     </div>
   );
