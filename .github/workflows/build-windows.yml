@@ -35,7 +35,6 @@ jobs:
         run: |
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > backend/.env
           bash build-dist.sh
-          mv PDFEditor.zip PDFEditor-macOS.zip
 
       # Windows build — inline pwsh steps
       - name: Create distribution structure

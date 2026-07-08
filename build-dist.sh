@@ -10,7 +10,7 @@ echo ""
 
 # 1. Clean
 echo "[1/6] Cleaning..."
-rm -rf "$APP" "$TEMP" "$ROOT/PDFEditor.zip" "$ROOT/PDFEditor-Windows.zip"
+rm -rf "$APP" "$TEMP" "$ROOT/PDFEditor-macOS.zip" "$ROOT/PDFEditor-Windows.zip"
 
 # 2. Build frontend
 echo "[2/6] Building frontend..."
@@ -154,13 +154,11 @@ VBS
 echo ""
 echo "Creating PDFEditor.zip (macOS)..."
 cd "$ROOT"
-zip -ry "PDFEditor.zip" "PDFEditor.app" -x "*/node_modules/.cache/*" > /dev/null 2>&1
+zip -ry "PDFEditor-macOS.zip" "PDFEditor.app" -x "*/node_modules/.cache/*" > /dev/null 2>&1
 
 # Create Windows zip (backend + launchers)
 echo "Creating PDFEditor-Windows.zip (Windows)..."
 mkdir -p "$TEMP/backend" "$TEMP/frontend"
-cp "$TEMP/start.bat" "$TEMP/"
-cp "$TEMP/start.vbs" "$TEMP/"
 cp -R "$ROOT/backend/src" "$TEMP/backend/src"
 cp "$ROOT/backend/package.json" "$TEMP/backend/"
 cp "$ROOT/backend/tsconfig.json" "$TEMP/backend/"
@@ -177,7 +175,7 @@ rm -rf "$TEMP"
 
 # Sizes
 APP_SIZE=$(du -sh "$APP" | cut -f1)
-ZIP_SIZE=$(du -h "$ROOT/PDFEditor.zip" | cut -f1)
+ZIP_SIZE=$(du -h "$ROOT/PDFEditor-macOS.zip" | cut -f1)
 WIN_SIZE=$(du -h "$ROOT/PDFEditor-Windows.zip" | cut -f1 2>/dev/null || echo "N/A")
 
 echo ""
@@ -187,7 +185,7 @@ echo "  macOS zip: $ZIP_SIZE"
 echo "  Windows zip: $WIN_SIZE"
 echo ""
 echo "How to use:"
-echo "  macOS: Unzip PDFEditor.zip → double-click PDFEditor.app"
+echo "  macOS: Unzip PDFEditor-macOS.zip → double-click PDFEditor.app"
 echo "  Windows: Unzip PDFEditor-Windows.zip → double-click start.vbs"
 echo ""
 echo "Note: macOS will show \"unverified developer\" on first launch."
