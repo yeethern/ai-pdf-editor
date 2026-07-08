@@ -163,24 +163,25 @@ export async function groupElements(
   pageHeight: number,
   onLog?: LogFn
 ): Promise<GroupElementsOutput> {
-  const elementsJson = elements.map((e, i) => ({
-    index: i,
-    content: e.content,
+  const elementsArr = elements.map((e, i) => ({
+    i,
+    c: e.content,
     x: e.x,
     y: e.y,
-    fontSize: e.fontSize,
+    f: e.fontSize,
   }));
 
   const msg = `AI grouping ${elements.length} elements on ${pageWidth}x${pageHeight} canvas`;
   console.log(`🧠 ${msg}`);
   onLog?.('ai', msg);
-  elementsJson.forEach((e, i) => {
-    const trunc = e.content.length > 120 ? e.content.slice(0, 120) + '...' : e.content;
-    console.log(`  el ${i}: "${trunc}" x=${e.x} y=${e.y} font=${e.fontSize}`);
+  elementsArr.forEach((e, i) => {
+    const trunc = e.c.length > 120 ? e.c.slice(0, 120) + '...' : e.c;
+    console.log(`  el ${i}: "${trunc}" x=${e.x} y=${e.y} font=${e.f}`);
   });
   const response = await openai.chat.completions.create({
     model: 'gpt-5-nano',
     max_completion_tokens: 10000,
+    reasoning_effort: 'low' as any,
     response_format: { type: 'json_object' } as any,
     prompt_cache_retention: '24h' as any,
     messages: [
@@ -193,11 +194,11 @@ The page is a canvas of pageWidth × pageHeight pixels. (0, 0) is the top-left c
 Group the text elements into the visual regions a human reader would naturally perceive on this page. Read the content and see the layout — figure out what belongs together as a coherent visual block (title block, bullet list, table, footer, label, etc.).
 
 Each element has:
-- index — its position in the input list
-- content — the text
+- i — index (its position in the input list)
+- c — content (the text)
 - x — left edge position in pixels
 - y — top edge position in pixels
-- fontSize — font size in points
+- f — fontSize in points
 
 Be aggressive about merging. Only split when elements are clearly separate visual regions that a human would see as distinct blocks.
 
@@ -208,7 +209,7 @@ Return ONLY a JSON object with NO markdown formatting:
       },
       {
         role: 'user',
-        content: JSON.stringify({ pageWidth, pageHeight, elements: elementsJson }),
+        content: JSON.stringify({ pageWidth, pageHeight, elements: elementsArr }),
       },
     ],
   });
@@ -238,6 +239,9 @@ Return ONLY a JSON object with NO markdown formatting:
     console.log(`  💾 cache hit: ${cached}/${lastUsage.prompt} tokens (${pct}%)`);
   }
   onLog?.('ai', doneMsg);
+  onLog?.('raw_response', content);
+  console.log('=== RAW AI RESPONSE ===');
+  console.log(content);
   let parsed: GroupElementsOutput;
   try {
     parsed = JSON.parse(content.trim());

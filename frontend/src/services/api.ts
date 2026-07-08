@@ -47,7 +47,7 @@ export const api = {
         if (!line.trim()) continue;
         try {
           const evt = JSON.parse(line);
-          if (['ai', 'page', 'group'].includes(evt.type)) {
+          if (['ai', 'page', 'group', 'raw_response'].includes(evt.type)) {
             console.log(evt.message || evt.type);
           }
           if (evt.type === 'error') throw new Error(evt.message || 'Upload failed');
