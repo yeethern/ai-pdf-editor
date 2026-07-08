@@ -9,35 +9,40 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Build frontend
+        shell: pwsh
         run: |
           cd frontend
           npm install
           npm run build
 
       - name: Create distribution structure
+        shell: pwsh
         run: |
-          mkdir dist\backend\src
-          mkdir dist\frontend
+          mkdir dist\backend\src -Force
+          mkdir dist\frontend -Force
 
       - name: Copy backend files
+        shell: pwsh
         run: |
-          copy backend\package.json dist\backend\
-          copy backend\tsconfig.json dist\backend\
-          xcopy /E /I backend\src dist\backend\src
-          if exist backend\fonts xcopy /E /I backend\fonts dist\backend\fonts
+          Copy-Item backend\package.json dist\backend\
+          Copy-Item backend\tsconfig.json dist\backend\
+          Copy-Item -Recurse backend\src dist\backend\src
+          if (Test-Path backend\fonts) { Copy-Item -Recurse backend\fonts dist\backend\fonts }
 
       - name: Copy frontend build
+        shell: pwsh
         run: |
-          xcopy /E /I frontend\dist dist\frontend
+          Copy-Item -Recurse frontend\dist dist\frontend
 
       - name: Install backend dependencies
+        shell: pwsh
         working-directory: dist\backend
         run: |
           npm install --omit=dev
@@ -64,14 +69,17 @@ jobs:
           "@ | Out-File -FilePath dist\start.vbs -Encoding ASCII
 
       - name: Create .env file
+        shell: pwsh
         run: |
-          echo OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} > dist\backend\.env
+          "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" | Out-File -FilePath dist\backend\.env -Encoding ASCII
 
       - name: Zip distribution
+        shell: pwsh
         run: |
           cd dist
           Compress-Archive -Path * -DestinationPath ..\PDFEditor-Windows.zip
 
       - name: Upload to release
+        shell: pwsh
         run: |
           gh release upload v1.0.0 PDFEditor-Windows.zip --clobber
