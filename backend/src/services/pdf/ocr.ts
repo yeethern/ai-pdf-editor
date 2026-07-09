@@ -29,7 +29,7 @@ function isMacOS(): boolean {
 }
 
 export function getRecommendedScale(): number {
-  return isMacOS() ? 0.75 : 2.0;
+  return 2.0;
 }
 
 function ensureBinary(): string {

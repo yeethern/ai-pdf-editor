@@ -73,7 +73,7 @@ int main(int argc, const char * argv[]) {
     }];
 
     req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
-    req.usesLanguageCorrection = NO;
+    req.usesLanguageCorrection = YES;
 
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cgImage options:@{}];
     [handler performRequests:@[req] error:nil];

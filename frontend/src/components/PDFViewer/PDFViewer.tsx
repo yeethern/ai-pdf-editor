@@ -49,6 +49,7 @@ export function PDFViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const zoomShiftRef = useRef({ x: 0, y: 0 });
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [selStartIdx, setSelStartIdx] = useState<number | null>(null);
@@ -113,7 +114,8 @@ export function PDFViewer() {
   }, []);
 
   useEffect(() => {
-    setPanOffset({ x: 0, y: 0 }); setSelStartIdx(null); setSelEndIdx(null);
+    setPanOffset({ x: 0, y: 0 }); zoomShiftRef.current = { x: 0, y: 0 };
+    setSelStartIdx(null); setSelEndIdx(null);
     setEditingId(null); setSelectedOverlayId(null);
     setFontOpen(false); setFontCat(null); setSizeOpen(false);
   }, [currentPage]);
@@ -264,8 +266,46 @@ export function PDFViewer() {
     const handler = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        const s = useEditorStore.getState();
-        s.setZoom(Math.max(0.25, Math.min(5, s.zoom + (e.deltaY > 0 ? -0.05 : 0.05))));
+        const container = containerRef.current;
+        const pageEl = pageRef.current;
+        if (!container || !pageEl) return;
+
+        const store = useEditorStore.getState();
+        const oldZoom = store.zoom;
+        const newZoom = Math.max(0.25, Math.min(5, oldZoom + (e.deltaY > 0 ? -0.05 : 0.05)));
+        if (newZoom === oldZoom) return;
+
+        const page = store.document?.pages?.[store.currentPage];
+        if (!page) return;
+        const pageW = page.width || 612;
+        const pageH = page.height || 792;
+
+        const containerRect = container.getBoundingClientRect();
+        const pageRect = pageEl.getBoundingClientRect();
+
+        const mousePageX = e.clientX - pageRect.left;
+        const mousePageY = e.clientY - pageRect.top;
+
+        const pdfX = mousePageX / oldZoom;
+        const pdfY = mousePageY / oldZoom;
+
+        const oldPw = pageW * oldZoom;
+        const newPw = pageW * newZoom;
+        const cw = containerRect.width;
+        const oldOffsetX = Math.max(0, (cw - oldPw) / 2);
+        const newOffsetX = Math.max(0, (cw - newPw) / 2);
+
+        let newScrollLeft = newOffsetX + pageRect.left - oldOffsetX + container.scrollLeft + pdfX * newZoom - e.clientX;
+        let newScrollTop = pageRect.top + container.scrollTop + pdfY * newZoom - e.clientY;
+
+        const shiftX = Math.max(0, -newScrollLeft);
+        const shiftY = Math.max(0, -newScrollTop);
+        zoomShiftRef.current.x += shiftX;
+        zoomShiftRef.current.y += shiftY;
+
+        store.setZoom(newZoom);
+        container.scrollLeft = Math.max(0, newScrollLeft);
+        container.scrollTop = Math.max(0, newScrollTop);
       }
     };
     el.addEventListener('wheel', handler, { passive: false });
@@ -302,6 +342,51 @@ export function PDFViewer() {
     const idx = nearestEl(e.clientX, e.clientY);
     idx !== null ? (setSelStartIdx(idx), setSelEndIdx(idx)) : clearSel();
   }, [nearestEl, panOffset, clearSel, selectedOverlayId]);
+
+  const onDblClick = useCallback((e: React.MouseEvent) => {
+    const idx = nearestEl(e.clientX, e.clientY);
+    if (idx !== null) return;
+
+    const container = containerRef.current;
+    const pageEl = pageRef.current;
+    if (!container || !pageEl) return;
+
+    const oldZoom = zoom;
+    const newZoom = Math.min(5, oldZoom * 1.5);
+    if (newZoom === oldZoom) return;
+
+    const page = doc?.pages?.[currentPage];
+    if (!page) return;
+    const pageW = page.width || 612;
+    const pageH = page.height || 792;
+
+    const containerRect = container.getBoundingClientRect();
+    const pageRect = pageEl.getBoundingClientRect();
+
+    const mousePageX = e.clientX - pageRect.left;
+    const mousePageY = e.clientY - pageRect.top;
+
+    const pdfX = mousePageX / oldZoom;
+    const pdfY = mousePageY / oldZoom;
+
+    const oldPw = pageW * oldZoom;
+    const newPw = pageW * newZoom;
+    const cw = containerRect.width;
+    const oldOffsetX = Math.max(0, (cw - oldPw) / 2);
+    const newOffsetX = Math.max(0, (cw - newPw) / 2);
+
+    let newScrollLeft = newOffsetX + pageRect.left - oldOffsetX + container.scrollLeft + pdfX * newZoom - e.clientX;
+    let newScrollTop = pageRect.top + container.scrollTop + pdfY * newZoom - e.clientY;
+
+    const shiftX = Math.max(0, -newScrollLeft);
+    const shiftY = Math.max(0, -newScrollTop);
+    zoomShiftRef.current.x += shiftX;
+    zoomShiftRef.current.y += shiftY;
+
+    setZoom(newZoom);
+    container.scrollLeft = Math.max(0, newScrollLeft);
+    container.scrollTop = Math.max(0, newScrollTop);
+  }, [zoom, doc, currentPage, nearestEl, setZoom]);
 
   const onMM = useCallback((e: React.MouseEvent) => {
     if (textDragRef.current) return;
@@ -616,7 +701,7 @@ export function PDFViewer() {
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-auto bg-gray-100 select-none" onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}>
-      <div ref={pageRef} className="relative mx-auto bg-white shadow-xl overflow-hidden" style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }}>
+      <div ref={pageRef} className="relative mx-auto bg-white shadow-xl overflow-hidden" style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, transform: `translate(${panOffset.x + zoomShiftRef.current.x}px, ${panOffset.y + zoomShiftRef.current.y}px)` }} onDoubleClick={onDblClick}>
         
         <img ref={imgRef} src={imgUrl!} alt="" className="block pointer-events-none select-none" style={{ width: pw, height: ph }} draggable={false} onLoad={() => setRenderTick(n => n + 1)} />
 

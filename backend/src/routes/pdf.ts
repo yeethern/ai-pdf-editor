@@ -37,6 +37,7 @@ const imageUpload = multer({
 export const pdfRouter = Router();
 
 pdfRouter.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
+  let responseEnded = false;
   try {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' });
@@ -48,22 +49,43 @@ pdfRouter.post('/upload', upload.single('file'), async (req: Request, res: Respo
     res.setHeader('X-Accel-Buffering', 'no');
 
     const writeLog = (type: string, message: string) => {
+      if (responseEnded) return;
       res.write(JSON.stringify({ type, message }) + '\n');
     };
 
     const filePath = req.file.path;
     const { resetAccumulatedAiUsage, getAccumulatedAiUsage } = require('../services/ai/service');
     resetAccumulatedAiUsage();
-    const document = await parsePDF(filePath, 2, writeLog);
+
+    let earlySent = false;
+
+    const document = await parsePDF(filePath, 2, writeLog, (partialDoc) => {
+      if (earlySent) return;
+      earlySent = true;
+
+      saveDocument(partialDoc);
+      const pdfUrl = `/api/pdf/file/${partialDoc.id}`;
+      const usage = getAccumulatedAiUsage();
+      responseEnded = true;
+      res.write(JSON.stringify({ type: 'done', data: { success: true, document: partialDoc, pdfUrl, usage } }) + '\n');
+      res.end();
+    });
+
+    // Full doc (all pages processed by the pool) — overwrites partial
     saveDocument(document);
 
-    const pdfUrl = `/api/pdf/file/${document.id}`;
-    const usage = getAccumulatedAiUsage();
-    res.write(JSON.stringify({ type: 'done', data: { success: true, document, pdfUrl, usage } }) + '\n');
-    res.end();
+    if (!earlySent) {
+      earlySent = true;
+      const pdfUrl = `/api/pdf/file/${document.id}`;
+      const usage = getAccumulatedAiUsage();
+      responseEnded = true;
+      res.write(JSON.stringify({ type: 'done', data: { success: true, document, pdfUrl, usage } }) + '\n');
+      res.end();
+    }
   } catch (err) {
     console.error('Upload failed:', err);
     const msg = err instanceof Error ? err.message : 'Failed to process PDF';
+    responseEnded = true;
     res.write(JSON.stringify({ type: 'error', message: msg }) + '\n');
     res.end();
   }
@@ -79,6 +101,12 @@ pdfRouter.post('/:id/page/:pageNum/process', async (req: Request, res: Response)
     const pageNum = parseInt(req.params.pageNum);
     if (isNaN(pageNum) || pageNum < 0 || pageNum >= doc.metadata!.pageCount) {
       res.status(400).json({ error: 'Invalid page number' });
+      return;
+    }
+
+    // If already processed by background pool, return cached
+    if (doc.pages[pageNum]?.elements?.length > 0) {
+      res.json({ success: true, elements: doc.pages[pageNum].elements, page: pageNum, usage: { prompt: 0, cached: 0, output: 0, total: 0 } });
       return;
     }
 

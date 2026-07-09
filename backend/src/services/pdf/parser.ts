@@ -286,9 +286,11 @@ function mergeLineElements(elements: TextElement[], columnBoundaries?: ColumnBou
         }
       }
       const newWidth: number = el.bbox[0] + el.bbox[2] - current.bbox[0];
+      const gap: number = el.bbox[0] - (current.bbox[0] + current.bbox[2]);
+      const sep: string = gap > 0 ? ' ' : '';
       current = {
         ...current,
-        content: current.content + (el.content.startsWith(' ') ? '' : ' ') + el.content,
+        content: current.content + sep + el.content,
         bbox: [current.bbox[0], current.bbox[1], newWidth, current.bbox[3]],
       };
     } else {
@@ -471,7 +473,7 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
 
   if (rawElements.length === 0) {
     const ocrScale = getRecommendedScale();
-    const ocrEngine = ocrScale === 0.75 ? 'macOS Vision' : 'Tesseract.js';
+    const ocrEngine = ocrScale === 1.25 ? 'macOS Vision' : 'Tesseract.js';
     const ocrMsg = `Page ${pageNum + 1}: no text layer, running OCR (${ocrEngine})...`;
     console.log(ocrMsg);
     onLog?.('page', ocrMsg);
@@ -487,8 +489,10 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
     console.log(ocrFoundMsg);
     onLog?.('page', ocrFoundMsg);
 
-    columnBoundaries = detectTableColumns(pageWidth, pageHeight, canvas, ocrScale, onLog);
-    rawElements = splitCrossColumnItems(ocrItems, columnBoundaries, ocrScale);
+    // columnBoundaries = detectTableColumns(pageWidth, pageHeight, canvas, ocrScale, onLog);
+    // rawElements = splitCrossColumnItems(ocrItems, columnBoundaries, ocrScale);
+    rawElements = ocrItems;
+    columnBoundaries = null;
   } else {
     columnBoundaries = detectColumnsByAlignment(rawElements, onLog);
     if (columnBoundaries) {
@@ -510,57 +514,100 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
   return merged;
 }
 
-export async function parsePDF(filePath: string, maxPages?: number, onLog?: import('../ai/service').LogFn): Promise<PDFDocument> {
+async function withPool<T>(tasks: (() => Promise<T>)[], pool: number): Promise<(T | Error)[]> {
+  const results: (T | Error)[] = [];
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const idx = next++;
+      if (idx >= tasks.length) break;
+      try {
+        results[idx] = await tasks[idx]();
+      } catch (err) {
+        results[idx] = err as Error;
+        console.error(`Task ${idx} failed:`, err);
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(pool, tasks.length) }, () => worker());
+  await Promise.allSettled(workers);
+  return results;
+}
+
+function buildDocSkeleton(docId: string, docName: string, pages: PDFPage[], pageCount: number): PDFDocument {
+  return {
+    id: docId,
+    name: docName,
+    pages,
+    metadata: { pageCount, title: docName },
+    overlays: [],
+    detectedQRCodes: [],
+  };
+}
+
+export async function parsePDF(
+  filePath: string,
+  maxPages?: number,
+  onLog?: import('../ai/service').LogFn,
+  onEarlyDoc?: (doc: PDFDocument) => void
+): Promise<PDFDocument> {
   const dataBuffer = fs.readFileSync(filePath);
   const pdfData: Uint8Array = new Uint8Array(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
   const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
   const pageCount = pdf.numPages;
-  const procCount = maxPages ? Math.min(maxPages, pageCount) : pageCount;
-
-  const pages: PDFPage[] = [];
-
-  for (let i = 1; i <= procCount; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 1 });
-    const pageWidth = Math.round(viewport.width);
-    const pageHeight = Math.round(viewport.height);
-
-    const startMsg = `Processing page ${i}/${procCount}...`;
-    console.log(startMsg);
-    onLog?.('page', startMsg);
-    const elements = await processOnePage(page, i - 1, pageWidth, pageHeight, onLog);
-
-    pages.push({ elements, width: pageWidth, height: pageHeight });
-  }
-
-  // Remaining pages: skeleton entries with dimensions only
-  for (let i = procCount + 1; i <= pageCount; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 1 });
-    pages.push({
-      elements: [],
-      width: Math.round(viewport.width),
-      height: Math.round(viewport.height),
-    });
-  }
 
   const docId = uuid();
   const docName = path.basename(filePath);
   originalPaths.set(docId, filePath);
 
-  const detectedQRCodes = await detectQRCodesForDoc(docId, procCount, onLog);
+  // Pre-allocate all pages with skeleton dimensions (fast, sequential)
+  const pages: PDFPage[] = new Array(pageCount);
+  for (let i = 0; i < pageCount; i++) {
+    const page = await pdf.getPage(i + 1);
+    const viewport = page.getViewport({ scale: 1 });
+    pages[i] = { elements: [], width: Math.round(viewport.width), height: Math.round(viewport.height) };
+  }
 
-  return {
-    id: docId,
-    name: docName,
-    pages,
-    metadata: {
-      pageCount,
-      title: docName,
-    },
-    overlays: [],
-    detectedQRCodes,
-  };
+  // Build tasks for ALL pages
+  let earlyFired = false;
+  const tasks: (() => Promise<void>)[] = [];
+  for (let i = 0; i < pageCount; i++) {
+    const pageIdx = i;
+    tasks.push(async () => {
+      const page = await pdf.getPage(pageIdx + 1);
+      const viewport = page.getViewport({ scale: 1 });
+      const pageWidth = Math.round(viewport.width);
+      const pageHeight = Math.round(viewport.height);
+
+      const startMsg = `Processing page ${pageIdx + 1}/${pageCount}...`;
+      console.log(startMsg);
+      onLog?.('page', startMsg);
+      const elements = await processOnePage(page, pageIdx, pageWidth, pageHeight, onLog);
+
+      pages[pageIdx] = { elements, width: pageWidth, height: pageHeight };
+
+      // Preview opens after page 2 (index 1) finishes
+      if (pageIdx === 1 && !earlyFired && onEarlyDoc) {
+        earlyFired = true;
+        onEarlyDoc(buildDocSkeleton(docId, docName, pages, pageCount));
+      }
+    });
+  }
+
+  // ALL pages run through 5-concurrency pool
+  await withPool(tasks, 5);
+
+  // If page 2 never fired (doc < 2 pages), fire onEarlyDoc now
+  if (!earlyFired && onEarlyDoc) {
+    earlyFired = true;
+    onEarlyDoc(buildDocSkeleton(docId, docName, pages, pageCount));
+  }
+
+  const detectedQRCodes = await detectQRCodesForDoc(docId, pageCount, onLog);
+
+  return buildDocSkeleton(docId, docName, pages, pageCount);
 }
 
 export async function processPage(pageIndex: number, document: PDFDocument, onLog?: import('../ai/service').LogFn): Promise<PageElement[]> {
