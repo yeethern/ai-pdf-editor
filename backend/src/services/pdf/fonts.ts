@@ -161,6 +161,108 @@ function widthMatchAll(
   return { family: widthResults[0].family, error: widthResults[0].error, allSorted: widthResults };
 }
 
+function otsuThreshold(data: Uint8ClampedArray, total: number): number {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < total; i++) {
+    const lum = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    hist[Math.round(lum)]++;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+
+  let sumB = 0;
+  let wB = 0;
+  let maxVariance = 0;
+  let threshold = 0;
+
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const variance = wB * wF * (mB - mF) * (mB - mF);
+    if (variance > maxVariance) {
+      maxVariance = variance;
+      threshold = i;
+    }
+  }
+
+  return threshold;
+}
+
+export function computeBoldnessRatio(
+  pageImage: Buffer,
+  pixelBbox: [number, number, number, number],
+): { ratio: number; height: number } | null {
+  const img = decodePageImage(pageImage);
+  if (!img) return null;
+
+  let [bx, by, bw, bh] = pixelBbox;
+  bx = Math.max(0, Math.floor(bx) - 2);
+  by = Math.max(0, Math.floor(by) - 2);
+  bw = Math.min(Math.ceil(bw) + 4, img.width - bx);
+  bh = Math.min(Math.ceil(bh) + 4, img.height - by);
+  if (bw < 4 || bh < 4) return null;
+
+  const c = createCanvas(bw, bh);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, bx, by, bw, bh, 0, 0, bw, bh);
+  const imageData = ctx.getImageData(0, 0, bw, bh);
+  const data = imageData.data;
+  const total = bw * bh;
+
+  const threshold = otsuThreshold(data, total);
+
+  let minY = bh, maxY = 0, minX = bw, maxX = 0;
+  const binary = new Uint8Array(total);
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const idx = y * bw + x;
+      const lum = 0.299 * data[idx * 4] + 0.587 * data[idx * 4 + 1] + 0.114 * data[idx * 4 + 2];
+      binary[idx] = lum < threshold ? 1 : 0;
+      if (binary[idx]) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+
+  if (maxY <= minY || maxX <= minX) return null;
+
+  const inkHeight = maxY - minY + 1;
+
+  // Median horizontal run-length = stroke width
+  const runLengths: number[] = [];
+  for (let y = minY; y <= maxY; y++) {
+    let count = 0;
+    for (let x = minX; x <= maxX; x++) {
+      if (binary[y * bw + x]) {
+        count++;
+      } else if (count > 0) {
+        runLengths.push(count);
+        count = 0;
+      }
+    }
+    if (count > 0) runLengths.push(count);
+  }
+
+  if (runLengths.length === 0) return null;
+
+  runLengths.sort((a, b) => a - b);
+  const mid = Math.floor(runLengths.length / 2);
+  const strokeWidth = runLengths.length % 2 === 0
+    ? (runLengths[mid - 1] + runLengths[mid]) / 2
+    : runLengths[mid];
+
+  return { ratio: strokeWidth / inkHeight, height: inkHeight };
+}
+
 const ERROR_THRESHOLD = 0.25;
 
 export function detectFont(

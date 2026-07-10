@@ -65,6 +65,7 @@ export interface PDFDocument {
   overlays: ImageOverlay[];
   detectedQRCodes?: DetectedQRCode[];
   qrCodeCoverActions?: QRCodeCoverAction[];
+  editedIds?: string[];
 }
 
 export interface ImageOverlay {
@@ -144,6 +145,8 @@ export interface EditorState {
   showSkillPanel: boolean;
   showStylePanel: boolean;
   editedIds: string[];
+  saveStatus: 'saved' | 'saving' | 'error';
+  selectedElementIds: string[];
 }
 
 export interface HistoryEntry {

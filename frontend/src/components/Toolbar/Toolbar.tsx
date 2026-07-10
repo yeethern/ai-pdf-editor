@@ -169,6 +169,9 @@ export function Toolbar() {
     addElement,
     markElementEdited,
     pushHistory,
+    saveStatus,
+    selectedElementIds,
+    updateMultipleElementsFontSize,
   } = useEditorStore();
 
   const pageCount = document?.pages?.length || 0;
@@ -238,8 +241,35 @@ export function Toolbar() {
   return (
     <div className="h-12 bg-white border-b border-gray-200 flex items-center px-3 gap-1 shrink-0 z-20">
       <div className="flex items-center gap-1 mr-4">
-        <span className="text-sm font-semibold text-gray-700 truncate max-w-[200px]">
+        <span className="text-sm font-semibold text-gray-700 truncate max-w-[200px]" title={document?.name}>
           {document?.name || 'Untitled'}
+        </span>
+        <span className="flex items-center ml-2">
+          {saveStatus === 'saving' && (
+            <span className="flex items-center text-xs text-gray-400 gap-1 animate-pulse select-none">
+              <svg className="animate-spin h-3.5 w-3.5 text-brand-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Saving...
+            </span>
+          )}
+          {saveStatus === 'saved' && (
+            <span className="flex items-center text-xs text-green-500 gap-1 font-medium bg-green-50 px-1.5 py-0.5 rounded border border-green-100 select-none">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Saved
+            </span>
+          )}
+          {saveStatus === 'error' && (
+            <span className="flex items-center text-xs text-red-500 gap-1 font-medium bg-red-50 px-1.5 py-0.5 rounded border border-red-100 select-none" title="Auto-save failed. Make sure backend is running.">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              Save Error
+            </span>
+          )}
         </span>
       </div>
 
@@ -330,6 +360,31 @@ export function Toolbar() {
           + Text
         </button>
       </div>
+
+      {selectedElementIds.length > 1 && (
+        <div className="flex items-center gap-1 bg-brand-50 border border-brand-200 px-2 py-0.5 rounded-lg mr-2 animate-fade-in shrink-0">
+          <span className="text-xs font-semibold text-brand-700 select-none">
+            Size ({selectedElementIds.length}):
+          </span>
+          <select
+            className="bg-white border border-brand-300 rounded text-xs px-1.5 py-0.5 text-brand-800 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500"
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              if (val > 0) {
+                updateMultipleElementsFontSize(currentPage, selectedElementIds, val);
+              }
+            }}
+            defaultValue=""
+          >
+            <option value="" disabled>--</option>
+            {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 54, 60, 72].map((size) => (
+              <option key={size} value={size}>
+                {size}px
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <button
         className={`btn-ghost p-1.5 rounded text-xs ${showAIPanel ? 'bg-brand-100 text-brand-700' : ''}`}

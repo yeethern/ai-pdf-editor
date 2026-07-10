@@ -52,7 +52,32 @@ export function OverlayPreviewCanvas({
       const dx = (e.clientX - ds.mx) / scale;
       const dy = (e.clientY - ds.my) / scale;
       if (dragging === 'move') {
-        onTransformChange({ x: ds.x + dx, y: ds.y + dy });
+        const candidateX = ds.x + dx;
+        const candidateY = ds.y + dy;
+
+        let snapX = candidateX;
+        let snapY = candidateY;
+        const threshold = 8;
+
+        // Snap X
+        if (Math.abs(candidateX + ds.w / 2 - pageWidth / 2) < threshold) {
+          snapX = pageWidth / 2 - ds.w / 2;
+        } else if (Math.abs(candidateX - 0) < threshold) {
+          snapX = 0;
+        } else if (Math.abs(candidateX + ds.w - pageWidth) < threshold) {
+          snapX = pageWidth - ds.w;
+        }
+
+        // Snap Y
+        if (Math.abs(candidateY + ds.h / 2 - pageHeight / 2) < threshold) {
+          snapY = pageHeight / 2 - ds.h / 2;
+        } else if (Math.abs(candidateY - 0) < threshold) {
+          snapY = 0;
+        } else if (Math.abs(candidateY + ds.h - pageHeight) < threshold) {
+          snapY = pageHeight - ds.h;
+        }
+
+        onTransformChange({ x: snapX, y: snapY });
       } else if (dragging === 'resize') {
         const patch: Record<string, number> = {};
         switch (ds.corner) {
@@ -104,7 +129,14 @@ export function OverlayPreviewCanvas({
     window.addEventListener('mousemove', onMM);
     window.addEventListener('mouseup', onMU);
     return () => { window.removeEventListener('mousemove', onMM); window.removeEventListener('mouseup', onMU); };
-  }, [dragging, scale, onTransformChange]);
+  }, [dragging, scale, onTransformChange, pageWidth, pageHeight]);
+
+  const showVLine = Math.abs(x + width / 2 - pageWidth / 2) < 0.01;
+  const showHLine = Math.abs(y + height / 2 - pageHeight / 2) < 0.01;
+  const showLeftLine = Math.abs(x - 0) < 0.01;
+  const showRightLine = Math.abs(x + width - pageWidth) < 0.01;
+  const showTopLine = Math.abs(y - 0) < 0.01;
+  const showBottomLine = Math.abs(y + height - pageHeight) < 0.01;
 
   return (
     <div className="space-y-2">
@@ -113,6 +145,44 @@ export function OverlayPreviewCanvas({
           <img src={pageImageUrl} alt="" className="absolute inset-0 w-full h-full pointer-events-none select-none" draggable={false} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">Page preview</div>
+        )}
+
+        {/* Snapping Guidelines */}
+        {showVLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: (pageWidth / 2) * scale,
+            width: 1.5, borderLeft: '1.5px dashed #3b82f6', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showHLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: (pageHeight / 2) * scale,
+            height: 1.5, borderTop: '1.5px dashed #3b82f6', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showLeftLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: 0,
+            width: 1.5, borderLeft: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showRightLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: pageWidth * scale - 1.5,
+            width: 1.5, borderLeft: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showTopLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: 0,
+            height: 1.5, borderTop: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showBottomLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: pageHeight * scale - 1.5,
+            height: 1.5, borderTop: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
         )}
         <div
           ref={overlayRef}

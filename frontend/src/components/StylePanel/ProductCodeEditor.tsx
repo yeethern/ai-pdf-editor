@@ -337,32 +337,59 @@ export function ProductCodeEditor() {
 
           {/* Segment editor */}
           {activeTable && (
-            <div className="space-y-0.5 p-2 bg-gray-50 rounded border border-gray-200 overflow-y-auto">
+            <div className="space-y-2 p-2 bg-gray-50 rounded border border-gray-200 max-h-96 overflow-y-auto">
               {activeTable.segments.map((seg, i) => (
-                <div key={seg.id}>
-                  <div className="flex items-center gap-1.5 text-xs py-0.5">
-                    <div className="flex flex-col">
-                      <button className="text-gray-400 hover:text-gray-700 leading-none p-0" onClick={() => moveSegment(i, -1)} disabled={i === 0}>▲</button>
-                      <button className="text-gray-400 hover:text-gray-700 leading-none p-0" onClick={() => moveSegment(i, 1)} disabled={i === segments.length - 1}>▼</button>
+                <div key={seg.id} className="p-2 bg-white border border-gray-200 rounded-md shadow-sm space-y-2 relative">
+                  {/* Line 1: Meta, Original Value, Mode, Separator, Delete */}
+                  <div className="flex items-center justify-between text-xs gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex flex-col flex-shrink-0">
+                        <button className="text-gray-400 hover:text-gray-700 leading-none p-0 text-[10px]" onClick={() => moveSegment(i, -1)} disabled={i === 0}>▲</button>
+                        <button className="text-gray-400 hover:text-gray-700 leading-none p-0 text-[10px]" onClick={() => moveSegment(i, 1)} disabled={i === segments.length - 1}>▼</button>
+                      </div>
+                      <span className="font-mono text-gray-800 font-semibold truncate" title={seg.values.join(', ')}>
+                        {seg.values.join('/')}
+                      </span>
                     </div>
 
-                    <span className="font-mono text-gray-500 w-10 truncate" title={seg.values.join(', ')}>
-                      {seg.values.join('/')}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${seg.isFixed ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-gray-150 border-gray-300 text-gray-600'}`}
+                        onClick={() => updateSegment(i, { isFixed: !seg.isFixed })}
+                      >
+                        {seg.isFixed ? 'Fixed' : 'Variable'}
+                      </button>
 
-                    <span className="text-gray-300">→</span>
+                      {i < segments.length - 1 && (
+                        <select
+                          className="input text-[10px] py-0.5 px-1 w-14"
+                          value={seg.separator}
+                          onChange={e => updateSegment(i, { separator: e.target.value })}
+                        >
+                          <option value="-">-</option>
+                          <option value=" ">space</option>
+                          <option value="">none</option>
+                        </select>
+                      )}
 
+                      <button className="text-gray-400 hover:text-red-500 p-0.5 text-sm" onClick={() => removeSegment(i)}>✕</button>
+                    </div>
+                  </div>
+
+                  {/* Line 2: Replacement input or Variable values expander */}
+                  <div className="pl-4 flex items-center gap-1.5 text-xs">
+                    <span className="text-gray-300 flex-shrink-0">→</span>
                     {seg.isFixed ? (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
                         <input
-                          className="input w-16 text-xs font-mono"
+                          className="input flex-1 min-w-0 text-xs font-mono py-0.5 px-1.5 border border-gray-300 rounded"
                           value={seg.replacement}
                           placeholder={seg.values[0] || ''}
                           onChange={e => updateSegment(i, { replacement: e.target.value })}
                         />
                         {/\d/.test(seg.replacement || seg.values[0] || '') && !usedPlusTwo.has(seg.id) && (
                           <button
-                            className="text-xs text-green-600 hover:text-green-800 font-bold"
+                            className="text-[10px] bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 px-1 py-0.5 rounded font-bold whitespace-nowrap"
                             onClick={() => {
                               updateSegment(i, { replacement: shiftDigits(seg.replacement || seg.values[0] || '', 2) });
                               setUsedPlusTwo(prev => new Set(prev).add(seg.id));
@@ -374,7 +401,7 @@ export function ProductCodeEditor() {
                         )}
                         {seg.values[0]?.includes('ECO') && (
                           <button
-                            className="text-xs text-red-600 hover:text-red-800 font-bold"
+                            className="text-[10px] bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 px-1 py-0.5 rounded font-bold whitespace-nowrap"
                             onClick={() => updateSegment(i, { replacement: (seg.replacement || seg.values[0] || '').replace(/^ECO(\d+)$/, 'TC-$1').replace(/^ECO$/, 'TC') })}
                             title="Replace ECO prefix with TC"
                           >
@@ -383,20 +410,21 @@ export function ProductCodeEditor() {
                         )}
                       </div>
                     ) : (
-                      <>
+                      <div className="flex flex-col flex-1 gap-1">
                         <button
-                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium text-left"
                           onClick={() => setExpandedVals(prev => ({ ...prev, [seg.id]: !prev[seg.id] }))}
                         >
-                          [{seg.values.length} values]
+                          {expandedVals[seg.id] ? 'Hide' : 'Show'} [{seg.values.length} values]
                         </button>
                         {expandedVals[seg.id] && (
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-col gap-1.5 w-full bg-gray-50 border border-gray-200 rounded p-1.5 mt-1">
                             {Object.entries(seg.perValueReps).map(([val, rep]) => (
-                              <div key={val} className="flex items-center gap-0.5">
-                                <span className="font-mono text-gray-400">{val}:</span>
+                              <div key={val} className="flex items-center gap-1.5 justify-between text-[11px]">
+                                <span className="font-mono text-gray-600 truncate max-w-[100px]" title={val}>{val}</span>
+                                <span className="text-gray-300">→</span>
                                 <input
-                                  className="input w-12 text-xs font-mono"
+                                  className="input w-28 text-xs font-mono py-0.5 px-1 border border-gray-300 rounded"
                                   value={rep}
                                   onChange={e => updateSegment(i, {
                                     perValueReps: { ...seg.perValueReps, [val]: e.target.value }
@@ -406,33 +434,19 @@ export function ProductCodeEditor() {
                             ))}
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
-
-                    <button
-                      className={`text-xs px-1.5 py-0.5 rounded border ${seg.isFixed ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-gray-100 border-gray-200 text-gray-500'}`}
-                      onClick={() => updateSegment(i, { isFixed: !seg.isFixed })}
-                    >
-                      {seg.isFixed ? 'Cat' : 'Val'}
-                    </button>
-
-                    {i < segments.length - 1 && (
-                      <select
-                        className="input text-xs w-14"
-                        value={seg.separator}
-                        onChange={e => updateSegment(i, { separator: e.target.value })}
-                      >
-                        <option value="-">-</option>
-                        <option value=" ">space</option>
-                        <option value="">none</option>
-                      </select>
-                    )}
-
-                    <button className="text-red-400 hover:text-red-600 ml-auto" onClick={() => removeSegment(i)}>✕</button>
                   </div>
 
                   {i < segments.length - 1 && (
-                    <button className="w-full text-gray-300 hover:text-gray-500 text-[10px] leading-none py-0.5" onClick={() => addSegment(i)}>+</button>
+                    <div className="flex justify-center -mb-2 mt-1">
+                      <button
+                        className="bg-white border border-gray-200 hover:border-gray-400 text-gray-400 hover:text-gray-700 text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow-sm z-10"
+                        onClick={() => addSegment(i)}
+                      >
+                        +
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}

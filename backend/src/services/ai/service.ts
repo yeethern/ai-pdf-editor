@@ -179,9 +179,9 @@ export async function groupElements(
     console.log(`  el ${i}: "${trunc}" x=${e.x} y=${e.y} font=${e.f}`);
   });
   const response = await openai.chat.completions.create({
-    model: 'gpt-5-nano',
+    model: 'gpt-4.1-nano',
     max_completion_tokens: 10000,
-    reasoning_effort: 'low' as any,
+    // reasoning_effort: 'low' as any,
     response_format: { type: 'json_object' } as any,
     prompt_cache_retention: '24h' as any,
     messages: [
@@ -196,23 +196,21 @@ Group the text elements into the visual regions a human reader would naturally p
 Each element has:
 - i — index (its position in the input list)
 - c — content (the text)
-- x — left edge position in pixels
-- y — top edge position in pixels
+- x — horizontal center position in pixels
+- y — vertical center position in pixels
 - f — fontSize in points
 
-Be aggressive about merging. Only split when elements are clearly separate visual regions that a human would see as distinct blocks.
-
-Additionally, for each group set isTable: true if the group forms a structured data grid with a header row and aligned data rows (like a product spec, price list, or spreadsheet).
+Be aggressive about merging. Only split when elements are clearly separate visual regions that a human would see as distinct blocks. Every single element index on the page MUST belong to a group. Do not omit any elements. There must be NO ungrouped elements. Group labels, titles, headers, descriptions, or notes into coherent blocks.
 
 Return ONLY a JSON object with NO markdown formatting:
-{ "groups": [{ "indices": [0, 1, 2], "isTable": false }, { "indices": [3, 4], "isTable": true }] }`,
+{ "groups": [{ "indices": [0, 1, 2] }, { "indices": [3, 4] }] }`,
       },
       {
         role: 'user',
         content: JSON.stringify({ pageWidth, pageHeight, elements: elementsArr }),
       },
     ],
-  });
+  } as any);
 
   const choice = response.choices[0];
   const content = choice?.message?.content;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useEditorStore } from '../../store';
 import { api } from '../../services/api';
 import { Condition, Action, StyleRule, ImageOverlay, PDFDocument } from '../../types';
@@ -69,10 +69,13 @@ function injectFontFace(family: string, ttfUrl: string) {
 function FontSelect({ value, onChange, fonts }: { value: any; onChange: (v: any) => void; fonts: Record<string, FontEntry> }) {
   const [open, setOpen] = useState(false);
   const [level, setLevel] = useState<'cat' | 'font'>('cat');
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
   const [pickedCat, setPickedCat] = useState<string | null>(() => {
     if (!value) return null;
     return fonts[value]?.category || null;
   });
+
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     for (const [family, entry] of Object.entries(fonts)) {
@@ -80,16 +83,90 @@ function FontSelect({ value, onChange, fonts }: { value: any; onChange: (v: any)
     }
   }, [fonts]);
 
-  const byCat: Record<string, string[]> = {};
-  for (const [name, entry] of Object.entries(fonts)) {
-    const cat = entry.category || 'sans-serif';
-    if (!byCat[cat]) byCat[cat] = [];
-    byCat[cat].push(name);
-  }
-  for (const cat of Object.keys(byCat)) byCat[cat].sort();
-  const catOrder = ['sans-serif', 'serif', 'slab-serif', 'mono'];
+  const byCat = useMemo(() => {
+    const res: Record<string, string[]> = {};
+    for (const [name, entry] of Object.entries(fonts)) {
+      const cat = entry.category || 'sans-serif';
+      if (!res[cat]) res[cat] = [];
+      res[cat].push(name);
+    }
+    for (const cat of Object.keys(res)) res[cat].sort();
+    return res;
+  }, [fonts]);
 
-  const catFonts = pickedCat ? (byCat[pickedCat] || []) : [];
+  const catOrder = useMemo(() => ['sans-serif', 'serif', 'slab-serif', 'mono'], []);
+
+  const catFonts = useMemo(() => pickedCat ? (byCat[pickedCat] || []) : [], [pickedCat, byCat]);
+
+  const options = useMemo(() => {
+    if (level === 'cat') {
+      const list = [{ type: 'none', label: 'None', value: '' }];
+      catOrder.forEach(cat => {
+        if (byCat[cat] && byCat[cat].length > 0) {
+          list.push({ type: 'cat', label: CATEGORY_LABELS[cat] || cat, value: cat });
+        }
+      });
+      return list;
+    } else {
+      const list = [{ type: 'back', label: '← Categories', value: '' }];
+      catFonts.forEach(name => {
+        list.push({ type: 'font', label: name, value: name });
+      });
+      return list;
+    }
+  }, [level, catFonts, byCat, catOrder]);
+
+  useEffect(() => {
+    if (open && listRef.current) {
+      const activeEl = listRef.current.querySelector(`[data-index="${highlightedIndex}"]`) as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex, open]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+        e.preventDefault();
+        setOpen(true);
+        setHighlightedIndex(0);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev + 1) % options.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev - 1 + options.length) % options.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const opt = options[highlightedIndex];
+      if (opt) {
+        if (opt.type === 'none') {
+          onChange('');
+          setOpen(false);
+          setLevel('cat');
+        } else if (opt.type === 'cat') {
+          setPickedCat(opt.value);
+          setLevel('font');
+          setHighlightedIndex(0);
+        } else if (opt.type === 'back') {
+          setLevel('cat');
+          setHighlightedIndex(0);
+        } else if (opt.type === 'font') {
+          onChange(opt.value);
+          setOpen(false);
+          setLevel('cat');
+        }
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
 
   const displayText = value
     ? value
@@ -101,35 +178,71 @@ function FontSelect({ value, onChange, fonts }: { value: any; onChange: (v: any)
 
   return (
     <div className="relative">
-      <button className="input text-xs w-32 text-left truncate" style={{ fontFamily: value || undefined }} onClick={() => setOpen(!open)} onBlur={() => setTimeout(() => setOpen(false), 150)}>
+      <button
+        className="input text-xs w-32 text-left truncate"
+        style={{ fontFamily: value || undefined }}
+        onClick={() => setOpen(!open)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={handleKeyDown}
+      >
         {displayText}
         <span className="float-right">▼</span>
       </button>
       {open && (
-        <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-300 rounded shadow-lg max-h-48 overflow-y-auto text-xs">
-          {level === 'cat' ? (
-            <>
-              <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer" style={{ fontFamily: 'inherit' }} onMouseDown={() => { onChange(''); setOpen(false); setLevel('cat'); }}>None</li>
-              <li className="border-b border-gray-200" />
-              {catOrder.map(cat =>
-                byCat[cat] && byCat[cat].length > 0 ? (
-                  <li key={cat} className="px-2 py-1 hover:bg-gray-100 cursor-pointer font-medium" onMouseDown={() => { setPickedCat(cat); setLevel('font'); }}>
-                    {CATEGORY_LABELS[cat] || cat}
-                  </li>
-                ) : null
-              )}
-            </>
-          ) : (
-            <>
-              <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer text-gray-500 text-center text-[10px] uppercase tracking-wider" onMouseDown={() => setLevel('cat')}>← Categories</li>
-              <li className="border-b border-gray-200" />
-              {catFonts.map(name => (
-                <li key={name} className="px-2 py-1 hover:bg-gray-100 cursor-pointer truncate" style={{ fontFamily: name }} onMouseDown={() => { onChange(name); setOpen(false); setLevel('cat'); }}>
-                  {name}
-                </li>
-              ))}
-            </>
-          )}
+        <ul
+          ref={listRef}
+          onMouseDown={e => e.preventDefault()}
+          className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-300 rounded shadow-lg max-h-48 overflow-y-auto text-xs"
+        >
+          {options.map((opt, idx) => {
+            const isHighlighted = idx === highlightedIndex;
+            let className = "px-2 py-1 hover:bg-gray-100 cursor-pointer truncate ";
+            let style: React.CSSProperties = {};
+
+            if (opt.type === 'none') {
+              style.fontFamily = 'inherit';
+            } else if (opt.type === 'cat') {
+              className += "font-medium";
+            } else if (opt.type === 'back') {
+              className += "text-gray-500 text-center text-[10px] uppercase tracking-wider";
+            } else if (opt.type === 'font') {
+              style.fontFamily = opt.value;
+            }
+
+            if (isHighlighted) {
+              className += " bg-brand-100 text-brand-900";
+            }
+
+            return (
+              <li
+                key={opt.type + '-' + (opt.value || idx)}
+                data-index={idx}
+                className={className}
+                style={style}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (opt.type === 'none') {
+                    onChange('');
+                    setOpen(false);
+                    setLevel('cat');
+                  } else if (opt.type === 'cat') {
+                    setPickedCat(opt.value);
+                    setLevel('font');
+                    setHighlightedIndex(0);
+                  } else if (opt.type === 'back') {
+                    setLevel('cat');
+                    setHighlightedIndex(0);
+                  } else if (opt.type === 'font') {
+                    onChange(opt.value);
+                    setOpen(false);
+                    setLevel('cat');
+                  }
+                }}
+              >
+                {opt.label}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -75,6 +75,7 @@ export interface PDFDocument {
   overlays: ImageOverlay[];
   detectedQRCodes?: DetectedQRCode[];
   qrCodeCoverActions?: QRCodeCoverAction[];
+  editedIds?: string[];
 }
 
 export interface SkillRule {

@@ -40,6 +40,9 @@ interface EditorActions {
   removeOverlay: (id: string) => void;
   setDetectedQRCodes: (qrCodes: DetectedQRCode[]) => void;
   setQRCodeCoverActions: (actions: QRCodeCoverAction[]) => void;
+  setSaveStatus: (status: EditorState['saveStatus']) => void;
+  setSelectedElementIds: (ids: string[]) => void;
+  updateMultipleElementsFontSize: (page: number, ids: string[], newSize: number) => void;
 }
 
 type EditorStore = EditorState & EditorActions;
@@ -60,22 +63,29 @@ const initialState: EditorState = {
   showSkillPanel: false,
   showStylePanel: false,
   editedIds: [],
+  saveStatus: 'saved',
+  selectedElementIds: [],
 };
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   ...initialState,
 
   setDocument: (doc, pdfUrl) =>
-    set({
-      document: doc,
-      pdfUrl: pdfUrl || null,
-      currentPage: 0,
-      zoom: 1,
-      selectedElementId: null,
-      annotations: [],
-      editHistory: [{ document: JSON.parse(JSON.stringify(doc)), editedIds: [], timestamp: Date.now(), description: 'Document loaded' }],
-      historyIndex: 0,
-      editedIds: [],
+    set((state) => {
+      const isNewDoc = !state.document || state.document.id !== doc.id;
+      return {
+        document: doc,
+        pdfUrl: pdfUrl || state.pdfUrl,
+        currentPage: isNewDoc ? 0 : state.currentPage,
+        zoom: isNewDoc ? 1 : state.zoom,
+        selectedElementId: isNewDoc ? null : state.selectedElementId,
+        annotations: isNewDoc ? [] : state.annotations,
+        editHistory: isNewDoc
+          ? [{ document: JSON.parse(JSON.stringify(doc)), editedIds: doc.editedIds || [], timestamp: Date.now(), description: 'Document loaded' }]
+          : state.editHistory,
+        historyIndex: isNewDoc ? 0 : state.historyIndex,
+        editedIds: isNewDoc ? (doc.editedIds || []) : state.editedIds,
+      };
     }),
 
   setCurrentPage: (page) => set({ currentPage: page }),
@@ -97,18 +107,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   markElementEdited: (id: string) => {
     set((state) => {
-      if (state.editedIds.includes(id)) return state;
-      if (!state.document) return { editedIds: [...state.editedIds, id] };
+      const nextEditedIds = state.editedIds.includes(id) ? state.editedIds : [...state.editedIds, id];
+      if (!state.document) return { editedIds: nextEditedIds };
       const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
-      const el = doc.pages[state.currentPage]?.elements?.find(e => e.id === id);
+      let el: any = null;
+      for (const page of doc.pages) {
+        const found = page.elements?.find(e => e.id === id);
+        if (found) {
+          el = found;
+          break;
+        }
+      }
       if (el && el.type === 'text' && !el.coverBbox) {
         el.coverBbox = [...el.bbox];
       }
-      return { document: doc, editedIds: [...state.editedIds, id] };
+      doc.editedIds = nextEditedIds;
+      return { document: doc, editedIds: nextEditedIds };
     });
   },
 
-  clearEditedIds: () => set({ editedIds: [] }),
+  clearEditedIds: () => set((state) => {
+    if (!state.document) return { editedIds: [] };
+    const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+    doc.editedIds = [];
+    return { document: doc, editedIds: [] };
+  }),
 
   updateOverlays: (overlays: ImageOverlay[]) => {
     const state = get();
@@ -148,9 +171,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   unmarkElementEdited: (id: string) => {
-    set((state) => ({
-      editedIds: state.editedIds.filter(eid => eid !== id),
-    }));
+    set((state) => {
+      const nextEditedIds = state.editedIds.filter(eid => eid !== id);
+      if (!state.document) return { editedIds: nextEditedIds };
+      const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+      doc.editedIds = nextEditedIds;
+      return { document: doc, editedIds: nextEditedIds };
+    });
   },
 
   updateElement: (page, elementId, updates) => {
@@ -290,13 +317,53 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       el.content = transformed;
     }
 
+    const nextEditedIds = state.editedIds.includes(id)
+      ? state.editedIds
+      : [...state.editedIds, id];
+    doc.editedIds = nextEditedIds;
+
     set({
       document: doc,
       aiResult: null,
       showAIPanel: false,
-      editedIds: state.editedIds.includes(id)
-        ? state.editedIds
-        : [...state.editedIds, id],
+      editedIds: nextEditedIds,
     });
+  },
+
+  setSaveStatus: (status) => set({ saveStatus: status }),
+
+  setSelectedElementIds: (ids) => set({ selectedElementIds: ids }),
+
+  updateMultipleElementsFontSize: (page, ids, newSize) => {
+    const state = get();
+    if (!state.document) return;
+
+    state.pushHistory(`Changed font size of ${ids.length} elements`);
+
+    const doc = JSON.parse(JSON.stringify(state.document)) as PDFDocument;
+    let modified = false;
+
+    for (const id of ids) {
+      const el = doc.pages[page]?.elements?.find(e => e.id === id);
+      if (el && el.type === 'text') {
+        el.fontSize = newSize;
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      const nextEditedIds = [...state.editedIds];
+      for (const id of ids) {
+        if (!nextEditedIds.includes(id)) {
+          nextEditedIds.push(id);
+          const el = doc.pages[page]?.elements?.find(e => e.id === id);
+          if (el && el.type === 'text' && !el.coverBbox) {
+            el.coverBbox = [...el.bbox];
+          }
+        }
+      }
+      doc.editedIds = nextEditedIds;
+      set({ document: doc, editedIds: nextEditedIds });
+    }
   },
 }));

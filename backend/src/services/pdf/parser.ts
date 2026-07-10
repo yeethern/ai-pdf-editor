@@ -369,29 +369,187 @@ async function detectParagraphAlignment(
 ): Promise<void> {
   if (elements.length === 0) return;
 
-  const input = elements.map(el => ({
-    content: el.content,
-    x: el.bbox[0],
-    y: el.bbox[1],
-    fontSize: el.fontSize || 11,
+  const parsed = elements.map((el, index) => ({
+    el,
+    index,
+    x: Math.round(el.bbox[0] + el.bbox[2] / 2),
+    y: Math.round(el.bbox[1] + el.bbox[3] / 2),
+    w: el.bbox[2],
+    h: el.bbox[3],
+    content: el.content?.trim() || '',
   }));
 
-  const result = await groupElements(input, pageWidth, pageHeight, onLog);
+  // Helper to build a dynamic RegExp pattern based on character groups
+  function getDynamicRegex(str: string): RegExp {
+    const parts = str.split(/([A-Za-z]+|\d+)/);
+    const regexStr = parts
+      .map(p => {
+        if (/^[A-Za-z]+$/.test(p)) return '[A-Za-z]+';
+        if (/^\d+$/.test(p)) return '\\d+';
+        return p.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      })
+      .join('');
+    return new RegExp('^' + regexStr + '$');
+  }
 
-  const assigned = new Set<number>();
-  for (let gi = 0; gi < result.groups.length; gi++) {
-    const g = result.groups[gi];
-    if (g.indices.length === 0) continue;
-    const groupEls = g.indices
-      .filter(idx => idx >= 0 && idx < elements.length)
-      .map(idx => elements[idx]);
-    g.indices.forEach(idx => assigned.add(idx));
-    const align = g.isTable ? 'center' : computeAlignment(groupEls, pageWidth);
-    let line = `  Group ${gi} [${align}]${g.isTable ? ' [TABLE]' : ''}:`;
+  // Helper to check if two 1D intervals overlap
+  function rangesOverlap(minA: number, maxA: number, minB: number, maxB: number): boolean {
+    return minA < maxB && maxA > minB;
+  }
+
+  // 1. Find all Code/Product Code headers and sort left-to-right
+  const codeHeaders = parsed
+    .filter(item => {
+      const text = item.content.toLowerCase();
+      return text === 'code' || text === 'product code' || text === 'productcode';
+    })
+    .sort((a, b) => a.x - b.x);
+
+  const tableIndices = new Set<number>();
+  const tableGroups: { indices: number[]; isTable: boolean }[] = [];
+
+  for (let hi = 0; hi < codeHeaders.length; hi++) {
+    const header = codeHeaders[hi];
+
+    // Find side-by-side headers to the right of this header (overlapping vertically)
+    const sideBySideHeaders = codeHeaders.filter(other => {
+      const isToTheRight = other.el.bbox[0] > header.el.bbox[0];
+      const verticalOverlaps = rangesOverlap(
+        header.el.bbox[1],
+        header.el.bbox[1] + header.el.bbox[3],
+        other.el.bbox[1],
+        other.el.bbox[1] + other.el.bbox[3]
+      );
+      return isToTheRight && verticalOverlaps;
+    });
+
+    // Define horizontal cutoff at the leftmost side-by-side table, or extend to page end
+    const maxX = sideBySideHeaders.length > 0
+      ? Math.min(...sideBySideHeaders.map(h => h.el.bbox[0]))
+      : pageWidth + 1000;
+
+    // Find the first element directly below this header (overlapping horizontally, smaller y)
+    const alignedBelow = parsed
+      .filter(item => {
+        const horizOverlap = rangesOverlap(
+          header.el.bbox[0],
+          header.el.bbox[0] + header.el.bbox[2],
+          item.el.bbox[0],
+          item.el.bbox[0] + item.el.bbox[2]
+        );
+        return (
+          item.index !== header.index &&
+          horizOverlap &&
+          item.el.bbox[1] > header.el.bbox[1] &&
+          item.content.length > 0
+        );
+      })
+      .sort((a, b) => a.el.bbox[1] - b.el.bbox[1]);
+
+    if (alignedBelow.length === 0) continue;
+    const firstCodeItem = alignedBelow[0];
+
+    // Build the dynamic RegExp pattern from the first item below the header
+    const dynamicPattern = getDynamicRegex(firstCodeItem.content);
+
+    // Vertical scan to collect code column cells matching the dynamic pattern
+    const rowCodeItems = [firstCodeItem];
+    let currentY = firstCodeItem.el.bbox[1];
+
+    while (true) {
+      const candidates = parsed
+        .filter(item => {
+          const horizOverlap = rangesOverlap(
+            header.el.bbox[0],
+            header.el.bbox[0] + header.el.bbox[2],
+            item.el.bbox[0],
+            item.el.bbox[0] + item.el.bbox[2]
+          );
+          return (
+            horizOverlap &&
+            item.el.bbox[1] > currentY &&
+            item.content.length > 0 &&
+            !rowCodeItems.some(existing => existing.index === item.index)
+          );
+        })
+        .sort((a, b) => a.el.bbox[1] - b.el.bbox[1]);
+
+      if (candidates.length === 0) break;
+      const nextCandidate = candidates[0];
+
+      // Stop scanning if the vertical gap is too large
+      if (nextCandidate.el.bbox[1] - currentY > 150) break;
+
+      // Stop scanning if the candidate does not match the dynamic pattern
+      if (!dynamicPattern.test(nextCandidate.content)) break;
+
+      rowCodeItems.push(nextCandidate);
+      currentY = nextCandidate.el.bbox[1];
+    }
+
+    // Now collect all cells inside the table boundaries
+    const groupIndices: number[] = [];
+
+    // Add header row elements
+    parsed.forEach(item => {
+      const vertOverlap = rangesOverlap(
+        header.el.bbox[1],
+        header.el.bbox[1] + header.el.bbox[3],
+        item.el.bbox[1],
+        item.el.bbox[1] + item.el.bbox[3]
+      );
+      const horizOverlap = rangesOverlap(
+        header.el.bbox[0],
+        maxX,
+        item.el.bbox[0],
+        item.el.bbox[0] + item.el.bbox[2]
+      );
+      if (vertOverlap && horizOverlap) {
+        groupIndices.push(item.index);
+        tableIndices.add(item.index);
+      }
+    });
+
+    // Add table row elements
+    for (const codeItem of rowCodeItems) {
+      parsed.forEach(item => {
+        const vertOverlap = rangesOverlap(
+          codeItem.el.bbox[1],
+          codeItem.el.bbox[1] + codeItem.el.bbox[3],
+          item.el.bbox[1],
+          item.el.bbox[1] + item.el.bbox[3]
+        );
+        const horizOverlap = rangesOverlap(
+          codeItem.el.bbox[0],
+          maxX,
+          item.el.bbox[0],
+          item.el.bbox[0] + item.el.bbox[2]
+        );
+        if (vertOverlap && horizOverlap) {
+          groupIndices.push(item.index);
+          tableIndices.add(item.index);
+        }
+      });
+    }
+
+    if (groupIndices.length > 0) {
+      tableGroups.push({
+        indices: [...new Set(groupIndices)],
+        isTable: true,
+      });
+    }
+  }
+
+  // Log table groups immediately (before AI runs)
+  for (let gi = 0; gi < tableGroups.length; gi++) {
+    const g = tableGroups[gi];
+    const groupEls = g.indices.map(idx => elements[idx]);
+    const align = 'center';
+    let line = `  Group ${gi} [${align}] [TABLE]:`;
     for (const el of groupEls) {
       el.alignment = align;
       el.groupIndex = gi;
-      (el as any).isTable = g.isTable;
+      (el as any).isTable = true;
       const snippet = el.content.length > 50 ? el.content.substring(0, 50) + '...' : el.content;
       line += ` "${snippet}"`;
     }
@@ -399,14 +557,44 @@ async function detectParagraphAlignment(
     onLog?.('group', line.replace(/^  /, ''));
   }
 
-  // Ungrouped elements become their own groups
-  for (let i = 0; i < elements.length; i++) {
-    if (!assigned.has(i)) {
-      elements[i].alignment = computeAlignment([elements[i]], pageWidth);
-      elements[i].groupIndex = -1;
-      const soloMsg = `Solo [${elements[i].alignment}]: "${elements[i].content.substring(0, 50)}"`;
-      console.log(`  ${soloMsg}`);
-      onLog?.('group', soloMsg);
+  // 2. Group everything else (non-table elements) using the AI layout grouping
+  const remainingIndices = parsed
+    .map(item => item.index)
+    .filter(idx => !tableIndices.has(idx));
+
+  if (remainingIndices.length > 0) {
+    const nonTableElements = remainingIndices.map(idx => elements[idx]);
+    const input = nonTableElements.map(el => ({
+      content: el.content,
+      x: Math.round(el.bbox[0] + el.bbox[2] / 2),
+      y: Math.round(el.bbox[1] + el.bbox[3] / 2),
+      fontSize: el.fontSize || 11,
+    }));
+
+    const result = await groupElements(input, pageWidth, pageHeight, onLog);
+
+    // Log and assign non-table groups returned by the AI
+    for (let i = 0; i < result.groups.length; i++) {
+      const g = result.groups[i];
+      if (g.indices.length === 0) continue;
+
+      const mappedIndices = g.indices
+        .filter(idx => idx >= 0 && idx < remainingIndices.length)
+        .map(idx => remainingIndices[idx]);
+
+      const gi = tableGroups.length + i;
+      const groupEls = mappedIndices.map(idx => elements[idx]);
+      const align = computeAlignment(groupEls, pageWidth);
+      let line = `  Group ${gi} [${align}]:`;
+      for (const el of groupEls) {
+        el.alignment = align;
+        el.groupIndex = gi;
+        (el as any).isTable = false;
+        const snippet = el.content.length > 50 ? el.content.substring(0, 50) + '...' : el.content;
+        line += ` "${snippet}"`;
+      }
+      console.log(line);
+      onLog?.('group', line.replace(/^  /, ''));
     }
   }
 }
@@ -414,6 +602,10 @@ async function detectParagraphAlignment(
 const originalPaths = new Map<string, string>();
 
 export function getOriginalPath(docId: string): string | undefined {
+  const targetPath = path.join(__dirname, '..', '..', '..', 'uploads', 'documents', `${docId}.pdf`);
+  if (fs.existsSync(targetPath)) {
+    return targetPath;
+  }
   return originalPaths.get(docId);
 }
 
@@ -473,18 +665,28 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
 
   if (rawElements.length === 0) {
     const ocrScale = getRecommendedScale();
-    const ocrEngine = ocrScale === 1.25 ? 'macOS Vision' : 'Tesseract.js';
+    const ocrEngine = ocrScale === 3.00 ? 'macOS Vision' : 'Tesseract.js';
     const ocrMsg = `Page ${pageNum + 1}: no text layer, running OCR (${ocrEngine})...`;
     console.log(ocrMsg);
     onLog?.('page', ocrMsg);
     const vp = page.getViewport({ scale: ocrScale });
     const canvas = createCanvas(vp.width, vp.height);
     const ctx = canvas.getContext('2d');
+
+    // Optimize canvas context settings for clean black-and-white OCR text segmentation
+    (ctx as any).antialias = 'gray';
+    (ctx as any).textDrawingMode = 'path';
+    ctx.imageSmoothingEnabled = false;
+
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, vp.width, vp.height);
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
-    const jpegBuf = canvas.toBuffer('image/jpeg', { quality: 0.9 });
-    const ocrItems = await ocrPage(jpegBuf, ocrScale, pageWidth, pageHeight);
+    const ocrFormatMsg = `Page ${pageNum + 1}: Rendering OCR image as PNG (lossless, antialias=gray, textDrawingMode=path)`;
+    console.log(ocrFormatMsg);
+    onLog?.('page', ocrFormatMsg);
+
+    const pngBuf = canvas.toBuffer('image/png');
+    const ocrItems = await ocrPage(pngBuf, ocrScale, pageWidth, pageHeight);
     const ocrFoundMsg = `Page ${pageNum + 1}: OCR found ${ocrItems.length} words`;
     console.log(ocrFoundMsg);
     onLog?.('page', ocrFoundMsg);
@@ -509,9 +711,11 @@ async function processOnePage(page: any, pageNum: number, pageWidth: number, pag
     onLog?.('page', itemsMsg);
   }
 
-  const merged = mergeLineElements(rawElements, columnBoundaries);
-  await detectParagraphAlignment(merged, pageWidth, pageHeight, onLog);
-  return merged;
+  // const merged = mergeLineElements(rawElements, columnBoundaries);
+  // await detectParagraphAlignment(merged, pageWidth, pageHeight, onLog);
+  // return merged;
+  await detectParagraphAlignment(rawElements, pageWidth, pageHeight, onLog);
+  return rawElements;
 }
 
 async function withPool<T>(tasks: (() => Promise<T>)[], pool: number): Promise<(T | Error)[]> {
@@ -560,7 +764,20 @@ export async function parsePDF(
 
   const docId = uuid();
   const docName = path.basename(filePath);
-  originalPaths.set(docId, filePath);
+  
+  // Persist original PDF to uploads/documents folder
+  const targetDir = path.join(__dirname, '..', '..', '..', 'uploads', 'documents');
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+  const targetPath = path.join(targetDir, `${docId}.pdf`);
+  try {
+    fs.renameSync(filePath, targetPath);
+  } catch (e) {
+    fs.copyFileSync(filePath, targetPath);
+    try { fs.unlinkSync(filePath); } catch {}
+  }
+  originalPaths.set(docId, targetPath);
 
   // Pre-allocate all pages with skeleton dimensions (fast, sequential)
   const pages: PDFPage[] = new Array(pageCount);
@@ -606,12 +823,13 @@ export async function parsePDF(
   }
 
   const detectedQRCodes = await detectQRCodesForDoc(docId, pageCount, onLog);
-
-  return buildDocSkeleton(docId, docName, pages, pageCount);
+  const doc = buildDocSkeleton(docId, docName, pages, pageCount);
+  doc.detectedQRCodes = detectedQRCodes;
+  return doc;
 }
 
 export async function processPage(pageIndex: number, document: PDFDocument, onLog?: import('../ai/service').LogFn): Promise<PageElement[]> {
-  const filePath = originalPaths.get(document.id);
+  const filePath = getOriginalPath(document.id);
   if (!filePath || !fs.existsSync(filePath)) {
     throw new Error('Original PDF not found');
   }

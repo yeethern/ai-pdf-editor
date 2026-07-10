@@ -307,7 +307,7 @@ pdfRouter.post('/:id/detect-qr', async (req: Request, res: Response) => {
     const { pages } = req.body as { pages?: number[] };
     const pageNums = pages && pages.length > 0
       ? pages
-      : [0];
+      : Array.from({ length: doc.metadata?.pageCount || 1 }, (_, i) => i);
 
     const allQRCodes: DetectedQRCode[] = [];
 

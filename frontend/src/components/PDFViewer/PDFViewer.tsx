@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useEditorStore } from '../../store';
 import { api } from '../../services/api';
 import { TextElement, PDFDocument, ImageOverlay } from '../../types';
@@ -45,19 +45,51 @@ async function ensureFontsLoaded(doc: PDFDocument) {
 }
 
 export function PDFViewer() {
-  const { document: doc, pdfUrl, currentPage, zoom, setZoom, setSelectedText, selectElement, updateElement, editedIds, markElementEdited, unmarkElementEdited, pushHistory, updateOverlay, removeOverlay } = useEditorStore();
+  const {
+    document: doc,
+    pdfUrl,
+    currentPage,
+    zoom,
+    setZoom,
+    setSelectedText,
+    selectElement,
+    updateElement,
+    editedIds,
+    markElementEdited,
+    unmarkElementEdited,
+    pushHistory,
+    updateOverlay,
+    removeOverlay,
+    selectedElementIds,
+    setSelectedElementIds,
+  } = useEditorStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const zoomShiftRef = useRef({ x: 0, y: 0 });
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
+  const panRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+  const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
+  const clickStartRef = useRef<{ x: number; y: number } | null>(null);
+  const customZoomCenterRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Apply pending scroll adjustments after React updates the DOM width/height for the new zoom level,
+  // preventing clamping to the old layout bounds.
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current && containerRef.current) {
+      const { left, top } = pendingScrollRef.current;
+      containerRef.current.scrollLeft = Math.max(0, left);
+      containerRef.current.scrollTop = Math.max(0, top);
+      pendingScrollRef.current = null;
+    }
+  }, [zoom]);
   const [selStartIdx, setSelStartIdx] = useState<number | null>(null);
   const [selEndIdx, setSelEndIdx] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editVal, setEditVal] = useState('');
   const [renderTick, setRenderTick] = useState(0);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragEnd, setDragEnd] = useState<{ x: number; y: number } | null>(null);
+  const [isDragSelecting, setIsDragSelecting] = useState(false);
+  const [dragSelectMode, setDragSelectMode] = useState(false);
   const overlayDragRef = useRef<{
     mode: 'move' | 'resize' | 'rotate';
     id: string;
@@ -85,6 +117,7 @@ export function PDFViewer() {
   } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editAreaRef = useRef<HTMLDivElement>(null);
 
   const page = doc?.pages?.[currentPage];
   const pw = (page?.width || 612) * zoom;
@@ -107,6 +140,7 @@ export function PDFViewer() {
       if (e.key === 'Escape') {
         setEditingId(null); setSelStartIdx(null); setSelEndIdx(null);
         setFontOpen(false); setFontCat(null); setSizeOpen(false);
+        setDragSelectMode(false);
       }
     };
     window.addEventListener('keydown', h);
@@ -114,10 +148,11 @@ export function PDFViewer() {
   }, []);
 
   useEffect(() => {
-    setPanOffset({ x: 0, y: 0 }); zoomShiftRef.current = { x: 0, y: 0 };
+    containerRef.current?.scrollTo(0, 0);
     setSelStartIdx(null); setSelEndIdx(null);
     setEditingId(null); setSelectedOverlayId(null);
     setFontOpen(false); setFontCat(null); setSizeOpen(false);
+    customZoomCenterRef.current = null;
   }, [currentPage]);
 
   // Auto-resize textarea width when editing starts
@@ -283,11 +318,23 @@ export function PDFViewer() {
         const containerRect = container.getBoundingClientRect();
         const pageRect = pageEl.getBoundingClientRect();
 
-        const mousePageX = e.clientX - pageRect.left;
-        const mousePageY = e.clientY - pageRect.top;
+        // Use the center of the container viewport, or the custom zoom center if set
+        let zoomX: number;
+        let zoomY: number;
+        let pdfX: number;
+        let pdfY: number;
 
-        const pdfX = mousePageX / oldZoom;
-        const pdfY = mousePageY / oldZoom;
+        if (customZoomCenterRef.current) {
+          pdfX = customZoomCenterRef.current.x;
+          pdfY = customZoomCenterRef.current.y;
+          zoomX = pageRect.left - containerRect.left + pdfX * oldZoom;
+          zoomY = pageRect.top - containerRect.top + pdfY * oldZoom;
+        } else {
+          zoomX = containerRect.width / 2;
+          zoomY = containerRect.height / 2;
+          pdfX = (containerRect.left + zoomX - pageRect.left) / oldZoom;
+          pdfY = (containerRect.top + zoomY - pageRect.top) / oldZoom;
+        }
 
         const oldPw = pageW * oldZoom;
         const newPw = pageW * newZoom;
@@ -295,17 +342,11 @@ export function PDFViewer() {
         const oldOffsetX = Math.max(0, (cw - oldPw) / 2);
         const newOffsetX = Math.max(0, (cw - newPw) / 2);
 
-        let newScrollLeft = newOffsetX + pageRect.left - oldOffsetX + container.scrollLeft + pdfX * newZoom - e.clientX;
-        let newScrollTop = pageRect.top + container.scrollTop + pdfY * newZoom - e.clientY;
+        let newScrollLeft = newOffsetX + pageRect.left - oldOffsetX + container.scrollLeft + pdfX * newZoom - (containerRect.left + zoomX);
+        let newScrollTop = pageRect.top + container.scrollTop + pdfY * newZoom - (containerRect.top + zoomY);
 
-        const shiftX = Math.max(0, -newScrollLeft);
-        const shiftY = Math.max(0, -newScrollTop);
-        zoomShiftRef.current.x += shiftX;
-        zoomShiftRef.current.y += shiftY;
-
+        pendingScrollRef.current = { left: newScrollLeft, top: newScrollTop };
         store.setZoom(newZoom);
-        container.scrollLeft = Math.max(0, newScrollLeft);
-        container.scrollTop = Math.max(0, newScrollTop);
       }
     };
     el.addEventListener('wheel', handler, { passive: false });
@@ -330,86 +371,34 @@ export function PDFViewer() {
     return bestDist < 50 ? best : null;
   }, [page, textEls, zoom]);
 
-  const clearSel = useCallback(() => { setSelStartIdx(null); setSelEndIdx(null); }, []);
-
-  const onMD = useCallback((e: React.MouseEvent) => {
-    setFontOpen(false); setFontCat(null); setSizeOpen(false);
-    if (selectedOverlayId) setSelectedOverlayId(null);
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-      setIsPanning(true); setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y }); e.preventDefault();
-      return;
+  const isClickOnText = useCallback((clientX: number, clientY: number): boolean => {
+    if (!pageRef.current || !page) return false;
+    const rect = pageRef.current.getBoundingClientRect();
+    const my = (clientY - rect.top) / zoom;
+    const mx = (clientX - rect.left) / zoom;
+    for (let i = 0; i < textEls.length; i++) {
+      const [ex, ey, ew, eh] = textEls[i].bbox;
+      // Allow a small 3px padding around the text bounding box for easier targeting
+      if (mx >= ex - 3 && mx <= ex + ew + 3 && my >= ey - 3 && my <= ey + eh + 3) return true;
     }
-    const idx = nearestEl(e.clientX, e.clientY);
-    idx !== null ? (setSelStartIdx(idx), setSelEndIdx(idx)) : clearSel();
-  }, [nearestEl, panOffset, clearSel, selectedOverlayId]);
+    return false;
+  }, [page, textEls, zoom]);
 
-  const onDblClick = useCallback((e: React.MouseEvent) => {
-    const idx = nearestEl(e.clientX, e.clientY);
-    if (idx !== null) return;
+  const clearSel = useCallback(() => {
+    setSelStartIdx(null);
+    setSelEndIdx(null);
+    setSelectedElementIds([]);
+  }, [setSelectedElementIds]);
 
-    const container = containerRef.current;
-    const pageEl = pageRef.current;
-    if (!container || !pageEl) return;
-
-    const oldZoom = zoom;
-    const newZoom = Math.min(5, oldZoom * 1.5);
-    if (newZoom === oldZoom) return;
-
-    const page = doc?.pages?.[currentPage];
-    if (!page) return;
-    const pageW = page.width || 612;
-    const pageH = page.height || 792;
-
-    const containerRect = container.getBoundingClientRect();
-    const pageRect = pageEl.getBoundingClientRect();
-
-    const mousePageX = e.clientX - pageRect.left;
-    const mousePageY = e.clientY - pageRect.top;
-
-    const pdfX = mousePageX / oldZoom;
-    const pdfY = mousePageY / oldZoom;
-
-    const oldPw = pageW * oldZoom;
-    const newPw = pageW * newZoom;
-    const cw = containerRect.width;
-    const oldOffsetX = Math.max(0, (cw - oldPw) / 2);
-    const newOffsetX = Math.max(0, (cw - newPw) / 2);
-
-    let newScrollLeft = newOffsetX + pageRect.left - oldOffsetX + container.scrollLeft + pdfX * newZoom - e.clientX;
-    let newScrollTop = pageRect.top + container.scrollTop + pdfY * newZoom - e.clientY;
-
-    const shiftX = Math.max(0, -newScrollLeft);
-    const shiftY = Math.max(0, -newScrollTop);
-    zoomShiftRef.current.x += shiftX;
-    zoomShiftRef.current.y += shiftY;
-
-    setZoom(newZoom);
-    container.scrollLeft = Math.max(0, newScrollLeft);
-    container.scrollTop = Math.max(0, newScrollTop);
-  }, [zoom, doc, currentPage, nearestEl, setZoom]);
-
-  const onMM = useCallback((e: React.MouseEvent) => {
-    if (textDragRef.current) return;
-    if (isPanning) { setPanOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y }); return; }
-    if (selStartIdx !== null) {
-      const idx = nearestEl(e.clientX, e.clientY);
-      if (idx !== null) setSelEndIdx(idx);
+  const onDoubleClickPage = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const clickedOnText = isClickOnText(e.clientX, e.clientY);
+    if (!clickedOnText) {
+      setDragSelectMode(true);
+      console.log('➕ Drag select mode activated');
     }
-  }, [isPanning, panStart, selStartIdx, nearestEl]);
+  }, [isClickOnText]);
 
-  const onMU = useCallback(() => {
-    if (textDragRef.current) return;
-    if (isPanning) { setIsPanning(false); return; }
-    if (selStartIdx !== null && selEndIdx !== null) {
-      const s = Math.min(selStartIdx, selEndIdx), e = Math.max(selStartIdx, selEndIdx);
-      const texts = textEls.slice(s, e + 1).map(x => x.content).filter(Boolean);
-      if (texts.length > 0) {
-        setSelectedText(texts.join(' '));
-        selectElement(textEls[s].id);
-      }
-    }
-    setIsPanning(false);
-  }, [selStartIdx, selEndIdx, textEls, setSelectedText, selectElement]);
 
   // Extract bg + fg colors from page canvas at bbox position (BEFORE modifying the DOM)
   const extractColorsFromPage = useCallback((elId: string, ex: number, ey: number, ew: number, eh: number) => {
@@ -481,6 +470,142 @@ export function PDFViewer() {
       );
     }
   }, [page]);
+
+  const onMD = useCallback((e: React.MouseEvent) => {
+    setFontOpen(false); setFontCat(null); setSizeOpen(false);
+    if (selectedOverlayId) setSelectedOverlayId(null);
+    clickStartRef.current = { x: e.clientX, y: e.clientY };
+
+    if (dragSelectMode) {
+      if (!pageRef.current) return;
+      const rect = pageRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setDragStart({ x, y });
+      setDragEnd({ x, y });
+      setIsDragSelecting(true);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      const c = containerRef.current!;
+      panRef.current = { active: true, startX: e.clientX, startY: e.clientY, scrollLeft: c.scrollLeft, scrollTop: c.scrollTop };
+      e.preventDefault();
+      return;
+    }
+    const idx = nearestEl(e.clientX, e.clientY);
+    if (idx !== null) {
+      setSelStartIdx(idx);
+      setSelEndIdx(idx);
+    } else {
+      clearSel();
+      if (editingId) {
+        saveEdit();
+      }
+      const c = containerRef.current!;
+      panRef.current = { active: true, startX: e.clientX, startY: e.clientY, scrollLeft: c.scrollLeft, scrollTop: c.scrollTop };
+      e.preventDefault();
+    }
+  }, [nearestEl, clearSel, selectedOverlayId, editingId, saveEdit, dragSelectMode]);
+
+  const onClickPage = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey) return;
+    if (!clickStartRef.current) return;
+    const dx = e.clientX - clickStartRef.current.x;
+    const dy = e.clientY - clickStartRef.current.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 5) return; // Prevent setting center if dragging/panning
+
+    const idx = nearestEl(e.clientX, e.clientY);
+    if (idx !== null) return;
+
+    const container = containerRef.current;
+    const pageEl = pageRef.current;
+    if (!container || !pageEl) return;
+
+    const pageRect = pageEl.getBoundingClientRect();
+    const mousePageX = e.clientX - pageRect.left;
+    const mousePageY = e.clientY - pageRect.top;
+
+    // Set the custom zoom center (in original PDF page points)
+    customZoomCenterRef.current = {
+      x: mousePageX / zoom,
+      y: mousePageY / zoom,
+    };
+
+    console.log(`🎯 Custom zoom center set: x=${customZoomCenterRef.current.x.toFixed(1)}, y=${customZoomCenterRef.current.y.toFixed(1)}`);
+  }, [nearestEl, zoom]);
+
+  const onMM = useCallback((e: React.MouseEvent) => {
+    if (textDragRef.current) return;
+    if (isDragSelecting && dragStart) {
+      if (!pageRef.current) return;
+      const rect = pageRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+      setDragEnd({ x, y });
+      return;
+    }
+    if (panRef.current.active) {
+      const c = containerRef.current!;
+      const p = panRef.current;
+      c.scrollLeft = p.scrollLeft - (e.clientX - p.startX);
+      c.scrollTop = p.scrollTop - (e.clientY - p.startY);
+      return;
+    }
+    if (selStartIdx !== null) {
+      const idx = nearestEl(e.clientX, e.clientY);
+      if (idx !== null) setSelEndIdx(idx);
+    }
+  }, [selStartIdx, nearestEl, isDragSelecting, dragStart]);
+
+  const onMU = useCallback(() => {
+    if (textDragRef.current) return;
+    if (isDragSelecting && dragStart && dragEnd) {
+      setIsDragSelecting(false);
+      setDragSelectMode(false);
+
+      const x1 = Math.min(dragStart.x, dragEnd.x) / zoom;
+      const y1 = Math.min(dragStart.y, dragEnd.y) / zoom;
+      const x2 = Math.max(dragStart.x, dragEnd.x) / zoom;
+      const y2 = Math.max(dragStart.y, dragEnd.y) / zoom;
+
+      const boxW = x2 - x1;
+      const boxH = y2 - y1;
+
+      if (boxW > 2 && boxH > 2) {
+        const selectedIds: string[] = [];
+        for (const el of textEls) {
+          const [ex, ey, ew, eh] = el.bbox;
+          const overlapX = x1 < (ex + ew) && x2 > ex;
+          const overlapY = y1 < (ey + eh) && y2 > ey;
+          if (overlapX && overlapY) {
+            selectedIds.push(el.id);
+          }
+        }
+        setSelectedElementIds(selectedIds);
+        if (selectedIds.length > 0) {
+          selectElement(selectedIds[0]);
+        } else {
+          selectElement(null);
+        }
+      }
+      setDragStart(null);
+      setDragEnd(null);
+      return;
+    }
+    if (panRef.current.active) { panRef.current.active = false; return; }
+    if (selStartIdx !== null && selEndIdx !== null) {
+      const s = Math.min(selStartIdx, selEndIdx), e = Math.max(selStartIdx, selEndIdx);
+      const texts = textEls.slice(s, e + 1).map(x => x.content).filter(Boolean);
+      if (texts.length > 0) {
+        setSelectedText(texts.join(' '));
+        selectElement(textEls[s].id);
+      }
+    }
+  }, [selStartIdx, selEndIdx, textEls, setSelectedText, selectElement, isDragSelecting, dragStart, dragEnd, zoom, setSelectedElementIds]);
 
   const handleOverlayMouseDown = useCallback((e: React.MouseEvent, overlayId: string, mode: 'move' | 'resize' | 'rotate', corner?: string) => {
     e.stopPropagation();
@@ -558,7 +683,33 @@ export function PDFViewer() {
       const dx = (e.clientX - drag.startX) / zoom;
       const dy = (e.clientY - drag.startY) / zoom;
       if (drag.mode === 'move') {
-        updateOverlay(drag.id, { x: drag.startOX + dx, y: drag.startOY + dy });
+        const candidateX = drag.startOX + dx;
+        const candidateY = drag.startOY + dy;
+        const pWidth = page?.width || 612;
+        const pHeight = page?.height || 792;
+        let snapX = candidateX;
+        let snapY = candidateY;
+        const threshold = 8;
+
+        // Snap X
+        if (Math.abs(candidateX + drag.startOW / 2 - pWidth / 2) < threshold) {
+          snapX = pWidth / 2 - drag.startOW / 2;
+        } else if (Math.abs(candidateX - 0) < threshold) {
+          snapX = 0;
+        } else if (Math.abs(candidateX + drag.startOW - pWidth) < threshold) {
+          snapX = pWidth - drag.startOW;
+        }
+
+        // Snap Y
+        if (Math.abs(candidateY + drag.startOH / 2 - pHeight / 2) < threshold) {
+          snapY = pHeight / 2 - drag.startOH / 2;
+        } else if (Math.abs(candidateY - 0) < threshold) {
+          snapY = 0;
+        } else if (Math.abs(candidateY + drag.startOH - pHeight) < threshold) {
+          snapY = pHeight - drag.startOH;
+        }
+
+        updateOverlay(drag.id, { x: snapX, y: snapY });
       } else if (drag.mode === 'resize' && drag.corner) {
         const patch: Record<string, number> = {};
         switch (drag.corner) {
@@ -610,7 +761,7 @@ export function PDFViewer() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [zoom, updateOverlay]);
+  }, [zoom, updateOverlay, page]);
 
   const startTextDrag = useCallback((e: React.MouseEvent, elId: string, mode: 'move' | 'resize' = 'move', corner?: string) => {
     e.stopPropagation();
@@ -699,11 +850,63 @@ export function PDFViewer() {
     selRange = { start: Math.min(selStartIdx, selEndIdx), end: Math.max(selStartIdx, selEndIdx) };
   }
 
+  const activeOverlay = selectedOverlayId ? doc?.overlays?.find(o => o.id === selectedOverlayId) : null;
+  const showVLine = activeOverlay && Math.abs(activeOverlay.x + activeOverlay.width / 2 - (page?.width || 612) / 2) < 0.01;
+  const showHLine = activeOverlay && Math.abs(activeOverlay.y + activeOverlay.height / 2 - (page?.height || 792) / 2) < 0.01;
+  const showLeftLine = activeOverlay && Math.abs(activeOverlay.x - 0) < 0.01;
+  const showRightLine = activeOverlay && Math.abs(activeOverlay.x + activeOverlay.width - (page?.width || 612)) < 0.01;
+  const showTopLine = activeOverlay && Math.abs(activeOverlay.y - 0) < 0.01;
+  const showBottomLine = activeOverlay && Math.abs(activeOverlay.y + activeOverlay.height - (page?.height || 792)) < 0.01;
+
   return (
     <div ref={containerRef} className="w-full h-full overflow-auto bg-gray-100 select-none" onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}>
-      <div ref={pageRef} className="relative mx-auto bg-white shadow-xl overflow-hidden" style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, transform: `translate(${panOffset.x + zoomShiftRef.current.x}px, ${panOffset.y + zoomShiftRef.current.y}px)` }} onDoubleClick={onDblClick}>
+      <div
+        ref={pageRef}
+        className="relative mx-auto bg-white shadow-xl overflow-hidden"
+        style={{ width: pw, minHeight: ph, marginTop: 40, marginBottom: 40, cursor: dragSelectMode ? 'crosshair' : 'default' }}
+        onClick={onClickPage}
+        onDoubleClick={onDoubleClickPage}
+      >
         
         <img ref={imgRef} src={imgUrl!} alt="" className="block pointer-events-none select-none" style={{ width: pw, height: ph }} draggable={false} onLoad={() => setRenderTick(n => n + 1)} />
+
+        {/* Snapping Guidelines */}
+        {showVLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: ((page?.width || 612) / 2) * zoom,
+            width: 1.5, borderLeft: '1.5px dashed #3b82f6', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showHLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: ((page?.height || 792) / 2) * zoom,
+            height: 1.5, borderTop: '1.5px dashed #3b82f6', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showLeftLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: 0,
+            width: 1.5, borderLeft: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showRightLine && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: (page?.width || 612) * zoom - 1.5,
+            width: 1.5, borderLeft: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showTopLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: 0,
+            height: 1.5, borderTop: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
+        {showBottomLine && (
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: (page?.height || 792) * zoom - 1.5,
+            height: 1.5, borderTop: '1.5px dashed #ef4444', zIndex: 15, pointerEvents: 'none',
+          }} />
+        )}
 
         {/* Selection highlight */}
         {selRange && textEls.slice(selRange.start, selRange.end + 1).map(el => {
@@ -720,6 +923,7 @@ export function PDFViewer() {
                 outlineOffset: 1,
                 borderRadius: 2,
                 pointerEvents: 'auto',
+                zIndex: 26,
               }}
             >
               {isSingle ? (
@@ -789,6 +993,44 @@ export function PDFViewer() {
             </div>
           );
         })}
+
+        {/* Highlight for drag-selected elements */}
+        {selectedElementIds.map(id => {
+          const el = textEls.find(e => e.id === id);
+          if (!el || el.id === editingId) return null;
+          const [ex, ey, ew, eh] = el.bbox;
+          return (
+            <div key={`drag-sel-${el.id}`}
+              style={{
+                position: 'absolute', left: ex * zoom, top: ey * zoom,
+                width: ew * zoom, height: eh * zoom,
+                background: 'rgba(59, 130, 246, 0.22)',
+                outline: '1.5px dashed #3b82f6',
+                borderRadius: 2,
+                pointerEvents: 'none',
+                zIndex: 26,
+              }}
+            />
+          );
+        })}
+
+        {/* Visual Drag Selection Outline */}
+        {isDragSelecting && dragStart && dragEnd && (
+          <div
+            style={{
+              position: 'absolute',
+              left: Math.min(dragStart.x, dragEnd.x),
+              top: Math.min(dragStart.y, dragEnd.y),
+              width: Math.abs(dragStart.x - dragEnd.x),
+              height: Math.abs(dragStart.y - dragEnd.y),
+              backgroundColor: 'rgba(59, 130, 246, 0.15)',
+              border: '1.5px solid rgba(59, 130, 246, 0.75)',
+              borderRadius: '4px',
+              zIndex: 30,
+              pointerEvents: 'none',
+            }}
+          />
+        )}
 
         {/* Edited text — per-element positioned text */}
         {(() => {
@@ -938,6 +1180,9 @@ export function PDFViewer() {
                 pointerEvents: 'auto',
               }}
               onMouseDown={(e) => {
+                if (isClickOnText(e.clientX, e.clientY)) {
+                  return;
+                }
                 e.stopPropagation();
                 if (isSelected) {
                   handleOverlayMouseDown(e, overlay.id, 'move');
@@ -1070,7 +1315,7 @@ export function PDFViewer() {
 
           const minW = Math.max(50, ew * zoom);
           return (
-            <div key="edit-area" style={{ position: 'absolute', left: ex * zoom, top: (ey - 22) * zoom, zIndex: 20, minWidth: minW }}>
+            <div ref={editAreaRef} key="edit-area" style={{ position: 'absolute', left: ex * zoom, top: (ey - 22) * zoom, zIndex: 20, minWidth: minW }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 2,
                 fontSize: 10, color: '#6366f1', background: '#eef2ff',
@@ -1145,7 +1390,7 @@ export function PDFViewer() {
                   <input
                     type="number"
                     value={el.fontSize || 11}
-                    onMouseDown={e => { e.stopPropagation(); e.preventDefault(); }}
+                    onMouseDown={e => { e.stopPropagation(); }}
                     onChange={e => {
                       const v = parseInt(e.target.value);
                       if (v > 0 && v < 200) {
@@ -1153,6 +1398,16 @@ export function PDFViewer() {
                         pushHistory('Changed font size');
                         setRenderTick(n => n + 1);
                       }
+                    }}
+                    onBlur={e => {
+                      if (e.relatedTarget && editAreaRef.current?.contains(e.relatedTarget as Node)) {
+                        return;
+                      }
+                      saveEdit();
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); }
+                      if (e.key === 'Enter') { e.preventDefault(); saveEdit(); }
                     }}
                     style={{
                       width: 32, fontSize: 10, lineHeight: '14px', padding: '0 2px',
@@ -1262,6 +1517,7 @@ export function PDFViewer() {
                 <button
                   onMouseDown={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     const s = useEditorStore.getState();
                     const orig = origContentRef.current.get(editingId);
                     if (orig !== undefined) {
@@ -1306,7 +1562,12 @@ export function PDFViewer() {
                     ta.style.width = Math.max(ta.scrollWidth, minW) + 'px';
                   }
                 }}
-                onBlur={saveEdit}
+                onBlur={e => {
+                  if (e.relatedTarget && editAreaRef.current?.contains(e.relatedTarget as Node)) {
+                    return;
+                  }
+                  saveEdit();
+                }}
                 onKeyDown={e => {
                   if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); }
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
